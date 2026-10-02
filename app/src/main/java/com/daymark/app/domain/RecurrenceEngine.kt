@@ -41,7 +41,11 @@ object RecurrenceEngine {
                     nextMatchingWeekday(current, seriesStart, interval, rule.weekdaysMask)
                 }
             }
-            MONTHLY -> current.plusMonths(interval.toLong())
+            MONTHLY -> {
+                val targetYearMonth = java.time.YearMonth.from(current).plusMonths(interval.toLong())
+                val targetDay = seriesStart.dayOfMonth.coerceAtMost(targetYearMonth.lengthOfMonth())
+                targetYearMonth.atDay(targetDay)
+            }
             CUSTOM -> {
                 if (rule.weekdaysMask == 0) return null
                 nextMatchingWeekday(current, seriesStart, interval, rule.weekdaysMask)

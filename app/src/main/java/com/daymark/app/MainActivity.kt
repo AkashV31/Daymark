@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private fun applyNotificationTarget(intent: Intent?) {
         val type = intent?.getStringExtra("daymark.owner_type") ?: return
         val id = intent.getStringExtra("daymark.owner_id") ?: return
+        intent.removeExtra("daymark.owner_type")
+        intent.removeExtra("daymark.owner_id")
         notificationTarget.value = type to id
     }
 }

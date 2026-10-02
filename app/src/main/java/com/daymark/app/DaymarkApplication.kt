@@ -13,6 +13,9 @@ import kotlinx.coroutines.launch
 class DaymarkApplication : Application() {
     val database: DaymarkDatabase by lazy { DaymarkDatabase.getInstance(this) }
     val repository: DaymarkRepository by lazy { DaymarkRepository(database) }
+    val assistantProvider: com.daymark.app.domain.assistant.AssistantProvider by lazy {
+        com.daymark.app.domain.assistant.NoopAssistantProvider
+    }
 
     override fun onCreate() {
         super.onCreate()

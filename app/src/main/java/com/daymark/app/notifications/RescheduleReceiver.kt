@@ -14,7 +14,11 @@ class RescheduleReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                runCatching { ReminderScheduler(context).rescheduleAll() }
+                val app = context.applicationContext as? com.daymark.app.DaymarkApplication
+                runCatching {
+                    app?.repository?.rollForwardRecurringTasks()
+                    ReminderScheduler(context).rescheduleAll()
+                }
             } finally {
                 pendingResult.finish()
             }

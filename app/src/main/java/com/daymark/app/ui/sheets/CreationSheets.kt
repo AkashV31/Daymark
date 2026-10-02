@@ -35,8 +35,8 @@ import androidx.compose.material.icons.rounded.Notes
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.WorkOutline
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -168,6 +168,8 @@ internal fun TaskEditorSheet(
     onLoadRule: suspend (String) -> RecurrenceRuleEntity?,
     onLoadSubtasks: (suspend (String) -> List<SubTaskEntity>)? = null,
     onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+    onArchive: (() -> Unit)? = null,
     onSave: (TaskEntity, String, Int, Int, Long?, Int?, Set<Int>, String, List<SubTaskEntity>) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -423,6 +425,29 @@ internal fun TaskEditorSheet(
                     }
                 }
             }
+            if (existing != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (onArchive != null) {
+                        TextButton(onClick = { onArchive(); onDismiss() }) {
+                            Text("Archive", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
+                    if (onDelete != null) {
+                        TextButton(
+                            onClick = { onDelete(); onDismiss() },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Delete task")
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -434,6 +459,7 @@ internal fun EventEditorSheet(
     use24HourClock: Boolean,
     onLoadReminders: suspend (String, String) -> Set<Int>,
     onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
     onSave: (EventEntity, Set<Int>) -> Unit
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -456,7 +482,7 @@ internal fun EventEditorSheet(
             OutlinedTextField(title, { title = it; validation = null }, Modifier.fillMaxWidth(), label = { Text("Event title") }, singleLine = true, shape = RoundedCornerShape(16.dp))
             OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Details (optional)") }, minLines = 2, maxLines = 4, shape = RoundedCornerShape(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DateChooser(day, { if (it != null) day = it }, "Date", Modifier.weight(1f))
+                DateChooser(day, { if (it != null) day = it }, "Date", Modifier.weight(1f), canClear = false)
                 if (!allDay) TimeChooser(minute, use24HourClock, { if (it != null) minute = it }, "Start time", Modifier.weight(1f))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -479,6 +505,15 @@ internal fun EventEditorSheet(
                     onDismiss()
                 }
             }
+            if (existing != null && onDelete != null) {
+                TextButton(
+                    onClick = { onDelete(); onDismiss() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete event")
+                }
+            }
         }
     }
 }
@@ -490,6 +525,7 @@ internal fun DeadlineEditorSheet(
     use24HourClock: Boolean,
     onLoadReminders: suspend (String, String) -> Set<Int>,
     onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
     onSave: (DeadlineEntity, Set<Int>) -> Unit
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -511,7 +547,7 @@ internal fun DeadlineEditorSheet(
             OutlinedTextField(title, { title = it; validation = null }, Modifier.fillMaxWidth(), label = { Text("What is due?") }, singleLine = true, shape = RoundedCornerShape(16.dp))
             OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Details (optional)") }, minLines = 2, maxLines = 4, shape = RoundedCornerShape(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DateChooser(day, { if (it != null) day = it }, "Due date", Modifier.weight(1f))
+                DateChooser(day, { if (it != null) day = it }, "Due date", Modifier.weight(1f), canClear = false)
                 TimeChooser(minute, use24HourClock, { if (it != null) minute = it }, "Due time", Modifier.weight(1f))
             }
             OutlinedTextField(category, { category = it }, Modifier.fillMaxWidth(), label = { Text("Course / project / category") }, singleLine = true, shape = RoundedCornerShape(16.dp))
@@ -530,13 +566,27 @@ internal fun DeadlineEditorSheet(
                     onDismiss()
                 }
             }
+            if (existing != null && onDelete != null) {
+                TextButton(
+                    onClick = { onDelete(); onDismiss() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete deadline")
+                }
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun NoteEditorSheet(existing: NoteEntity?, onDismiss: () -> Unit, onSave: (NoteEntity) -> Unit) {
+internal fun NoteEditorSheet(
+    existing: NoteEntity?,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+    onSave: (NoteEntity) -> Unit
+) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by rememberSaveable(existing?.id) { mutableStateOf(existing?.title.orEmpty()) }
     var content by rememberSaveable(existing?.id) { mutableStateOf(existing?.content.orEmpty()) }
@@ -561,13 +611,27 @@ internal fun NoteEditorSheet(existing: NoteEntity?, onDismiss: () -> Unit, onSav
                     onDismiss()
                 }
             }
+            if (existing != null && onDelete != null) {
+                TextButton(
+                    onClick = { onDelete(); onDismiss() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete note")
+                }
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun GoalEditorSheet(existing: GoalEntity?, onDismiss: () -> Unit, onSave: (GoalEntity) -> Unit) {
+internal fun GoalEditorSheet(
+    existing: GoalEntity?,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+    onSave: (GoalEntity) -> Unit
+) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by rememberSaveable(existing?.id) { mutableStateOf(existing?.title.orEmpty()) }
     var description by rememberSaveable(existing?.id) { mutableStateOf(existing?.description.orEmpty()) }
@@ -598,6 +662,15 @@ internal fun GoalEditorSheet(existing: GoalEntity?, onDismiss: () -> Unit, onSav
                     onDismiss()
                 }
             }
+            if (existing != null && onDelete != null) {
+                TextButton(
+                    onClick = { onDelete(); onDismiss() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete goal")
+                }
+            }
         }
     }
 }
@@ -609,6 +682,7 @@ internal fun ProjectEditorSheet(
     goals: List<GoalEntity>,
     onLoadMilestones: (suspend (String) -> List<MilestoneEntity>)? = null,
     onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
     onSave: (ProjectEntity, List<MilestoneEntity>) -> Unit
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -705,6 +779,15 @@ internal fun ProjectEditorSheet(
                     onDismiss()
                 }
             }
+            if (existing != null && onDelete != null) {
+                TextButton(
+                    onClick = { onDelete(); onDismiss() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete project")
+                }
+            }
         }
     }
 }
@@ -715,6 +798,7 @@ internal fun CourseEditorSheet(
     existing: CourseEntity?,
     onLoadModules: (suspend (String) -> List<CourseModuleEntity>)? = null,
     onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null,
     onSave: (CourseEntity, List<CourseModuleEntity>) -> Unit
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -836,6 +920,15 @@ internal fun CourseEditorSheet(
                     onDismiss()
                 }
             }
+            if (existing != null && onDelete != null) {
+                TextButton(
+                    onClick = { onDelete(); onDismiss() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete course")
+                }
+            }
         }
     }
 }
@@ -853,7 +946,7 @@ private fun SheetHeading(title: String, subtitle: String, onClose: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateChooser(epochDay: Long?, onChange: (Long?) -> Unit, label: String, modifier: Modifier = Modifier) {
+private fun DateChooser(epochDay: Long?, onChange: (Long?) -> Unit, label: String, modifier: Modifier = Modifier, canClear: Boolean = true) {
     var open by remember { mutableStateOf(false) }
     val selectedMillis = epochDay?.let { LocalDate.ofEpochDay(it).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
     val state = rememberDatePickerState(initialSelectedDateMillis = selectedMillis ?: LocalDate.now().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
@@ -876,7 +969,11 @@ private fun DateChooser(epochDay: Long?, onChange: (Long?) -> Unit, label: Strin
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { onChange(null); open = false }) { Text("Clear") }
+                    if (canClear) {
+                        TextButton(onClick = { onChange(null); open = false }) { Text("Clear") }
+                    } else {
+                        TextButton(onClick = { onChange(LocalDate.now().toEpochDay()); open = false }) { Text("Today") }
+                    }
                     TextButton(onClick = { open = false }) { Text("Cancel") }
                 }
             }

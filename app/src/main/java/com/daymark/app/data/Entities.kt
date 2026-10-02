@@ -341,7 +341,9 @@ data class UserPreferencesEntity(
     @PrimaryKey val id: Int = 1,
     val displayName: String = "",
     val themeKey: String = "LIGHT",
+    val accentKey: String = "LIGHT",
     val notificationSoundId: String = "default",
+    val loudReminders: Boolean = true,
     val use24HourClock: Boolean = false,
     val weekStartsOn: Int = 1,
     val notificationsExplained: Boolean = false,
@@ -393,6 +395,7 @@ object DashboardWidgets {
     const val COURSES = "COURSES"
     const val RECENT_NOTES = "RECENT_NOTES"
     const val INSIGHTS = "INSIGHTS"
+    const val ASSISTANT = "ASSISTANT"
 
     val defaults = listOf(
         DashboardConfigurationEntity(TODAY_PROGRESS, true, 0),
@@ -402,6 +405,7 @@ object DashboardWidgets {
         DashboardConfigurationEntity(GOALS, true, 4),
         DashboardConfigurationEntity(COURSES, false, 5),
         DashboardConfigurationEntity(RECENT_NOTES, false, 6),
-        DashboardConfigurationEntity(INSIGHTS, false, 7)
+        DashboardConfigurationEntity(INSIGHTS, false, 7),
+        DashboardConfigurationEntity(ASSISTANT, false, 8)
     )
 }

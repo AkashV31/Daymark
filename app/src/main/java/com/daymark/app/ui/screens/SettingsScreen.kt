@@ -65,16 +65,15 @@ import com.daymark.app.ui.components.SectionHeading
 import com.daymark.app.ui.components.SoftCard
 import com.daymark.app.ui.components.TinyPill
 
-private data class ThemeOption(val id: String, val title: String, val color: Color)
-private val themeOptions = listOf(
-    ThemeOption("LIGHT", "Daymark Light", Color(0xFF7467D8)),
-    ThemeOption("DARK", "Daymark Dark", Color(0xFF292938)),
-    ThemeOption("SYSTEM", "System", Color(0xFF6A7487)),
-    ThemeOption("LAVENDER", "Lavender", Color(0xFF7A5CE1)),
-    ThemeOption("OCEAN", "Ocean", Color(0xFF397EA5)),
-    ThemeOption("SAGE", "Sage", Color(0xFF4C8977)),
-    ThemeOption("ROSE", "Rose", Color(0xFFB9688C)),
-    ThemeOption("MONOCHROME", "Monochrome", Color(0xFF525B70))
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.rounded.Check
+import com.daymark.app.ui.theme.allAccents
+
+private data class ModeOption(val id: String, val title: String)
+private val modeOptions = listOf(
+    ModeOption("LIGHT", "Light"),
+    ModeOption("DARK", "Dark"),
+    ModeOption("SYSTEM", "System default")
 )
 
 @Composable
@@ -87,6 +86,9 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSaveName: (String) -> Unit,
     onTheme: (String) -> Unit,
+    onAccent: (String) -> Unit,
+    onToggle24HourClock: (Boolean) -> Unit,
+    onToggleLoudReminders: (Boolean) -> Unit = {},
     onSound: (String) -> Unit,
     onTestSound: () -> Unit,
     onImportSound: () -> Unit,
@@ -105,7 +107,7 @@ fun SettingsScreen(
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Settings", "Make Daymark feel like yours", onBack = onBack)
-        LazySettingsContent(
+        SettingsContent(
             preferences = preferences,
             dashboard = dashboard,
             sounds = sounds,
@@ -115,6 +117,9 @@ fun SettingsScreen(
             onDisplayNameChange = { displayName = it },
             onSaveName = { onSaveName(displayName.trim()) },
             onTheme = onTheme,
+            onAccent = onAccent,
+            onToggle24HourClock = onToggle24HourClock,
+            onToggleLoudReminders = onToggleLoudReminders,
             onSound = onSound,
             onTestSound = onTestSound,
             onImportSound = onImportSound,
@@ -157,7 +162,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun LazySettingsContent(
+private fun SettingsContent(
     preferences: UserPreferencesEntity,
     dashboard: List<DashboardConfigurationEntity>,
     sounds: List<NotificationSoundEntity>,
@@ -167,6 +172,9 @@ private fun LazySettingsContent(
     onDisplayNameChange: (String) -> Unit,
     onSaveName: () -> Unit,
     onTheme: (String) -> Unit,
+    onAccent: (String) -> Unit,
+    onToggle24HourClock: (Boolean) -> Unit,
+    onToggleLoudReminders: (Boolean) -> Unit,
     onSound: (String) -> Unit,
     onTestSound: () -> Unit,
     onImportSound: () -> Unit,
@@ -183,7 +191,7 @@ private fun LazySettingsContent(
     val widgets = (dashboard.ifEmpty { defaultDashboard }).sortedBy { it.position }
     val builtinSelected = NotificationSoundCatalog.builtIns.any { it.id == preferences.notificationSoundId }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 5.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 5.dp).padding(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SectionHeading("Appearance")
@@ -193,25 +201,85 @@ private fun LazySettingsContent(
                     Icon(Icons.Rounded.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.size(10.dp))
                     Column {
-                        Text("Choose a theme", style = MaterialTheme.typography.titleMedium)
-                        Text("A softer palette for the way you plan.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Theme & colors", style = MaterialTheme.typography.titleMedium)
+                        Text("Personalize your appearance and accents.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Spacer(Modifier.height(9.dp))
-                Column {
-                    themeOptions.forEach { option ->
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onTheme(option.id) }.padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                Spacer(Modifier.height(14.dp))
+                Text("Mode", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    modeOptions.forEach { mode ->
+                        FilterChip(
+                            selected = preferences.themeKey == mode.id,
+                            onClick = { onTheme(mode.id) },
+                            label = { Text(mode.title) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text("Accent palette", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    allAccents.forEach { opt ->
+                        val isSelected = preferences.accentKey == opt.id
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onAccent(opt.id) }
+                                .padding(horizontal = 6.dp, vertical = 6.dp)
                         ) {
-                            RadioButton(selected = preferences.themeKey == option.id, onClick = { onTheme(option.id) })
-                            Box(Modifier.size(18.dp).clip(CircleShape).background(option.color))
-                            Spacer(Modifier.size(10.dp))
-                            Text(option.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(opt.previewColor)
+                                    .then(
+                                        if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                                        else Modifier
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Rounded.Check,
+                                        contentDescription = "Selected",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                opt.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
-                HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("24-hour clock", style = MaterialTheme.typography.bodyLarge)
+                        Text("Format times in 24-hour format (e.g. 14:30 instead of 2:30 PM)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = preferences.use24HourClock,
+                        onCheckedChange = onToggle24HourClock
+                    )
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 OutlinedTextField(
                     value = displayName,
                     onValueChange = onDisplayNameChange,
@@ -255,6 +323,24 @@ private fun LazySettingsContent(
                     } else {
                         TinyPill("Available", tint = MaterialTheme.colorScheme.secondary)
                     }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Loud reminders", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Play reminders at alarm volume so they're heard.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = preferences.loudReminders,
+                        onCheckedChange = onToggleLoudReminders
+                    )
                 }
             }
         }

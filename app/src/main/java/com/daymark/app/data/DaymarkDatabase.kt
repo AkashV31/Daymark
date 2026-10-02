@@ -10,6 +10,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -43,6 +45,15 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET archived = 1, updatedAtMillis = :now WHERE id = :id")
     suspend fun archive(id: String, now: Long)
+
+    @Query("DELETE FROM tasks WHERE id = :id")
+    suspend fun delete(id: String)
+
+    @Query("DELETE FROM tasks WHERE seriesId = :seriesId")
+    suspend fun deleteSeries(seriesId: String)
+
+    @Query("DELETE FROM tasks WHERE seriesId = :seriesId AND dueEpochDay >= :fromEpochDay")
+    suspend fun deleteSeriesFrom(seriesId: String, fromEpochDay: Long)
 }
 
 @Dao
@@ -55,6 +66,9 @@ interface SubTaskDao {
 
     @Query("SELECT * FROM subtasks WHERE taskId = :taskId ORDER BY sortOrder")
     suspend fun getForTask(taskId: String): List<SubTaskEntity>
+
+    @Query("SELECT * FROM subtasks WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): SubTaskEntity?
 
     @Query("DELETE FROM subtasks WHERE id = :id")
     suspend fun delete(id: String)
@@ -109,6 +123,9 @@ interface EventDao {
 
     @Upsert
     suspend fun upsertAll(items: List<EventEntity>)
+
+    @Query("DELETE FROM events WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -133,6 +150,9 @@ interface DeadlineDao {
 
     @Upsert
     suspend fun upsertAll(items: List<DeadlineEntity>)
+
+    @Query("DELETE FROM deadlines WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -178,6 +198,9 @@ interface NoteDao {
 
     @Upsert
     suspend fun upsertAll(items: List<NoteEntity>)
+
+    @Query("DELETE FROM notes WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -199,6 +222,9 @@ interface CourseDao {
 
     @Upsert
     suspend fun upsertAll(items: List<CourseEntity>)
+
+    @Query("DELETE FROM courses WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -208,6 +234,9 @@ interface CourseModuleDao {
 
     @Query("SELECT * FROM course_modules WHERE courseId = :courseId ORDER BY sortOrder")
     suspend fun getForCourse(courseId: String): List<CourseModuleEntity>
+
+    @Query("SELECT * FROM course_modules WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): CourseModuleEntity?
 
     @Query("SELECT * FROM course_modules")
     suspend fun getAll(): List<CourseModuleEntity>
@@ -233,6 +262,9 @@ interface ProjectDao {
     @Query("SELECT * FROM projects")
     suspend fun getAll(): List<ProjectEntity>
 
+    @Query("SELECT * FROM projects WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): ProjectEntity?
+
     @Query("SELECT * FROM projects WHERE lower(title) LIKE '%' || lower(:query) || '%' OR lower(description) LIKE '%' || lower(:query) || '%' ORDER BY updatedAtMillis DESC LIMIT 100")
     suspend fun search(query: String): List<ProjectEntity>
 
@@ -241,6 +273,9 @@ interface ProjectDao {
 
     @Upsert
     suspend fun upsertAll(items: List<ProjectEntity>)
+
+    @Query("DELETE FROM projects WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -251,6 +286,9 @@ interface GoalDao {
     @Query("SELECT * FROM goals")
     suspend fun getAll(): List<GoalEntity>
 
+    @Query("SELECT * FROM goals WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): GoalEntity?
+
     @Query("SELECT * FROM goals WHERE lower(title) LIKE '%' || lower(:query) || '%' OR lower(description) LIKE '%' || lower(:query) || '%' ORDER BY updatedAtMillis DESC LIMIT 100")
     suspend fun search(query: String): List<GoalEntity>
 
@@ -259,12 +297,18 @@ interface GoalDao {
 
     @Upsert
     suspend fun upsertAll(items: List<GoalEntity>)
+
+    @Query("DELETE FROM goals WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
 interface MilestoneDao {
     @Query("SELECT * FROM milestones")
     suspend fun getAll(): List<MilestoneEntity>
+
+    @Query("SELECT * FROM milestones WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): MilestoneEntity?
 
     @Query("SELECT * FROM milestones WHERE projectId = :projectId ORDER BY sortOrder")
     suspend fun getForProject(projectId: String): List<MilestoneEntity>
@@ -421,7 +465,7 @@ interface BackupMetadataDao {
         NotificationSoundEntity::class, NotificationChannelConfigurationEntity::class,
         BackupMetadataEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 abstract class DaymarkDatabase : RoomDatabase() {
@@ -449,12 +493,19 @@ abstract class DaymarkDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: DaymarkDatabase? = null
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_preferences ADD COLUMN accentKey TEXT NOT NULL DEFAULT 'LIGHT'")
+                db.execSQL("ALTER TABLE user_preferences ADD COLUMN loudReminders INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         fun getInstance(context: Context): DaymarkDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 DaymarkDatabase::class.java,
                 "daymark-local.db"
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
         }
     }
 }

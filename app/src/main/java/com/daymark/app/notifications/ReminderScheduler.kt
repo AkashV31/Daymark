@@ -10,6 +10,8 @@ import com.daymark.app.data.DaymarkRepository
 import com.daymark.app.data.ReminderEntity
 import com.daymark.app.domain.ReminderPlanner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
@@ -37,89 +39,85 @@ class ReminderScheduler(context: Context) {
         val triggerAtMillis: Long
     )
 
-    suspend fun rescheduleAll(): ScheduleSummary = withContext(Dispatchers.IO) {
-        val zone = ZoneId.systemDefault()
-        val taskMap = database.taskDao().getAll()
-            .filter { !it.archived && it.status != DaymarkRepository.STATUS_COMPLETED && it.status != "SKIPPED" }
-            .associateBy { it.id }
-        val eventMap = database.eventDao().getActive().associateBy { it.id }
-        val deadlineMap = database.deadlineDao().getActive()
-            .filter { !it.archived && it.status != "COMPLETED" }
-            .associateBy { it.id }
-        val pref = database.preferenceDao().get()
-        val reminders = database.reminderDao().getEnabled()
-        val now = System.currentTimeMillis()
-        val planned = ArrayList<PlannedAlarm>(reminders.size)
-        var skippedPast = 0
+    suspend fun rescheduleAll(): ScheduleSummary = reconciliationMutex.withLock {
+        withContext(Dispatchers.IO) {
+            val zone = ZoneId.systemDefault()
+            val taskMap = database.taskDao().getAll()
+                .filter { !it.archived && it.status != DaymarkRepository.STATUS_COMPLETED && it.status != "SKIPPED" }
+                .associateBy { it.id }
+            val eventMap = database.eventDao().getActive().associateBy { it.id }
+            val deadlineMap = database.deadlineDao().getActive()
+                .filter { !it.archived && it.status != "COMPLETED" }
+                .associateBy { it.id }
+            val reminders = database.reminderDao().getEnabled()
+            val now = System.currentTimeMillis()
+            val planned = ArrayList<PlannedAlarm>(reminders.size)
+            var skippedPast = 0
 
-        reminders.forEach { reminder ->
-            val isRecentSnooze = reminder.snoozedUntilMillis?.let { now - it <= LATE_SNOOZE_GRACE_MILLIS } == true
-            if (reminder.lastDeliveredAtMillis != null && reminder.snoozedUntilMillis == null) return@forEach
-            if (reminder.lastDeliveredAtMillis != null && !isRecentSnooze) return@forEach
+            reminders.forEach { reminder ->
+                val isRecentSnooze = reminder.snoozedUntilMillis?.let { now - it <= LATE_SNOOZE_GRACE_MILLIS } == true
+                if (reminder.lastDeliveredAtMillis != null && reminder.snoozedUntilMillis == null) return@forEach
+                if (reminder.lastDeliveredAtMillis != null && !isRecentSnooze) return@forEach
 
-            val titleAndDue = when (reminder.ownerType) {
-                DaymarkRepository.OWNER_TASK -> taskMap[reminder.ownerId]?.let { task ->
-                    task.title to ReminderPlanner.taskTrigger(task, reminder, zone)
-                }
-                DaymarkRepository.OWNER_EVENT -> eventMap[reminder.ownerId]?.let { event ->
-                    event.title to ReminderPlanner.eventTrigger(event, reminder, zone)
-                }
-                DaymarkRepository.OWNER_DEADLINE -> deadlineMap[reminder.ownerId]?.let { deadline ->
-                    deadline.title to ReminderPlanner.deadlineTrigger(deadline, reminder, zone)
-                }
-                else -> null
-            } ?: return@forEach
+                val titleAndDue = when (reminder.ownerType) {
+                    DaymarkRepository.OWNER_TASK -> taskMap[reminder.ownerId]?.let { task ->
+                        task.title to ReminderPlanner.taskTrigger(task, reminder, zone)
+                    }
+                    DaymarkRepository.OWNER_EVENT -> eventMap[reminder.ownerId]?.let { event ->
+                        event.title to ReminderPlanner.eventTrigger(event, reminder, zone)
+                    }
+                    DaymarkRepository.OWNER_DEADLINE -> deadlineMap[reminder.ownerId]?.let { deadline ->
+                        deadline.title to ReminderPlanner.deadlineTrigger(deadline, reminder, zone)
+                    }
+                    else -> null
+                } ?: return@forEach
 
-            val dueInstant = titleAndDue.second ?: return@forEach
-            val snoozeAt = reminder.snoozedUntilMillis
-            val triggerAt = when {
-                snoozeAt != null && snoozeAt > now -> snoozeAt
-                snoozeAt != null && isRecentSnooze -> now + 1_000L
-                snoozeAt != null -> { skippedPast++; return@forEach }
-                dueInstant.toEpochMilli() > now -> dueInstant.toEpochMilli()
-                reminder.lastDeliveredAtMillis == null && now - dueInstant.toEpochMilli() <= LATE_REMINDER_GRACE_MILLIS -> now + 1_000L
-                else -> { skippedPast++; return@forEach }
+                val dueInstant = titleAndDue.second ?: return@forEach
+                val snoozeAt = reminder.snoozedUntilMillis
+                val triggerAt = when {
+                    snoozeAt != null && snoozeAt > now -> snoozeAt
+                    snoozeAt != null && isRecentSnooze -> now + 1_000L
+                    snoozeAt != null -> { skippedPast++; return@forEach }
+                    dueInstant.toEpochMilli() > now -> dueInstant.toEpochMilli()
+                    reminder.lastDeliveredAtMillis == null && now - dueInstant.toEpochMilli() <= LATE_REMINDER_GRACE_MILLIS -> now + 1_000L
+                    else -> { skippedPast++; return@forEach }
+                }
+                val key = alarmKey(reminder.ownerType, reminder.ownerId, reminder.id)
+                planned += PlannedAlarm(
+                    key = key,
+                    ownerType = reminder.ownerType,
+                    ownerId = reminder.ownerId,
+                    reminderId = reminder.id,
+                    title = titleAndDue.first,
+                    triggerAtMillis = triggerAt
+                )
             }
-            val key = alarmKey(reminder.ownerType, reminder.ownerId, reminder.id)
-            planned += PlannedAlarm(
-                key = key,
-                ownerType = reminder.ownerType,
-                ownerId = reminder.ownerId,
-                reminderId = reminder.id,
-                title = titleAndDue.first,
-                triggerAtMillis = triggerAt
-            )
-        }
 
-        val oldKeys = prefs.getStringSet(KEY_SCHEDULED_ALARMS, emptySet()).orEmpty().toSet()
-        val currentKeys = planned.mapTo(linkedSetOf()) { it.key }
-        (oldKeys - currentKeys).forEach(::cancelAlarm)
+            val oldKeys = prefs.getStringSet(KEY_SCHEDULED_ALARMS, emptySet()).orEmpty().toSet()
+            val currentKeys = planned.mapTo(linkedSetOf()) { it.key }
+            (oldKeys - currentKeys).forEach(::cancelAlarm)
 
-        var exactCount = 0
-        var inexactCount = 0
-        planned.forEach { item ->
-            val pending = pendingIntent(item, PendingIntent.FLAG_UPDATE_CURRENT)
-            val exactAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
-            if (exactAllowed) {
-                try {
-                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.triggerAtMillis, pending)
-                    exactCount++
-                } catch (_: SecurityException) {
+            var exactCount = 0
+            var inexactCount = 0
+            planned.forEach { item ->
+                val pending = pendingIntent(item, PendingIntent.FLAG_UPDATE_CURRENT)
+                val exactAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+                if (exactAllowed) {
+                    try {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.triggerAtMillis, pending)
+                        exactCount++
+                    } catch (_: SecurityException) {
+                        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.triggerAtMillis, pending)
+                        inexactCount++
+                    }
+                } else {
                     alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.triggerAtMillis, pending)
                     inexactCount++
                 }
-            } else {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.triggerAtMillis, pending)
-                inexactCount++
             }
+            prefs.edit().putStringSet(KEY_SCHEDULED_ALARMS, currentKeys).apply()
+            ScheduleSummary(planned.size, exactCount, inexactCount, skippedPast)
         }
-        prefs.edit().putStringSet(KEY_SCHEDULED_ALARMS, currentKeys).apply()
-        ScheduleSummary(planned.size, exactCount, inexactCount, skippedPast)
-    }
-
-    suspend fun cancelOwner(ownerType: String, ownerId: String) {
-        // Reconciliation also cancels old identities after reminder removal/editing.
-        rescheduleAll()
     }
 
     private fun alarmKey(ownerType: String, ownerId: String, reminderId: String) =
@@ -156,7 +154,28 @@ class ReminderScheduler(context: Context) {
         pending.cancel()
     }
 
+    fun cancelPosted(ownerType: String, ownerId: String) {
+        val manager = androidx.core.app.NotificationManagerCompat.from(appContext)
+        val prefix = "$ownerType:$ownerId:"
+        val currentKeys = prefs.getStringSet(KEY_SCHEDULED_ALARMS, emptySet()).orEmpty()
+        currentKeys.filter { it.startsWith(prefix) }.forEach { key ->
+            manager.cancel(key.hashCode())
+        }
+    }
+
+    suspend fun cancelOwner(ownerType: String, ownerId: String) = reconciliationMutex.withLock {
+        cancelPosted(ownerType, ownerId)
+        val prefix = "$ownerType:$ownerId:"
+        val oldKeys = prefs.getStringSet(KEY_SCHEDULED_ALARMS, emptySet()).orEmpty().toSet()
+        val matching = oldKeys.filter { it.startsWith(prefix) }
+        matching.forEach(::cancelAlarm)
+        if (matching.isNotEmpty()) {
+            prefs.edit().putStringSet(KEY_SCHEDULED_ALARMS, oldKeys - matching.toSet()).apply()
+        }
+    }
+
     companion object {
+        private val reconciliationMutex = Mutex()
         private const val PREFS_NAME = "daymark_alarm_reconciliation"
         private const val KEY_SCHEDULED_ALARMS = "scheduled_alarm_ids"
         private const val LATE_REMINDER_GRACE_MILLIS = 2 * 60 * 60 * 1000L

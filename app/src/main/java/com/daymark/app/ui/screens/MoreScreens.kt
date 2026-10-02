@@ -61,12 +61,16 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
 
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.remember
+
 @Composable
 fun MoreHubScreen(onOpen: (MoreDestination) -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 30.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
             Column(Modifier.padding(bottom = 4.dp)) {
@@ -75,12 +79,16 @@ fun MoreHubScreen(onOpen: (MoreDestination) -> Unit) {
                 Text("Keep your plans, learning and settings in one quiet place.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item { MoreDestinationCard("Goals", "Outcomes you’re moving toward", Icons.Rounded.Flag, Color(0xFF8876D9)) { onOpen(MoreDestination.GOALS) } }
-        item { MoreDestinationCard("Projects", "Multi-step plans and milestones", Icons.Rounded.WorkOutline, Color(0xFF658CA4)) { onOpen(MoreDestination.PROJECTS) } }
-        item { MoreDestinationCard("Learning", "Courses and skill-building", Icons.Rounded.MenuBook, Color(0xFF5B9A8C)) { onOpen(MoreDestination.COURSES) } }
-        item { MoreDestinationCard("Deadlines", "Important dates that stay visible", Icons.Rounded.CalendarMonth, Color(0xFFB87A82)) { onOpen(MoreDestination.DEADLINES) } }
-        item { MoreDestinationCard("Insights", "A neutral review of your execution", Icons.Rounded.Insights, Color(0xFF777CC0)) { onOpen(MoreDestination.INSIGHTS) } }
-        item { MoreDestinationCard("Settings & backup", "Appearance, reminders and local data", Icons.Rounded.Settings, Color(0xFF78869C)) { onOpen(MoreDestination.SETTINGS) } }
+        item { SectionHeading("Plan") }
+        item { MoreDestinationCard("Goals", "Outcomes you’re moving toward", Icons.Rounded.Flag, MaterialTheme.colorScheme.primary) { onOpen(MoreDestination.GOALS) } }
+        item { MoreDestinationCard("Projects", "Multi-step plans and milestones", Icons.Rounded.WorkOutline, MaterialTheme.colorScheme.secondary) { onOpen(MoreDestination.PROJECTS) } }
+        item { SectionHeading("Learn") }
+        item { MoreDestinationCard("Learning", "Courses and skill-building", Icons.Rounded.MenuBook, MaterialTheme.colorScheme.tertiary) { onOpen(MoreDestination.COURSES) } }
+        item { MoreDestinationCard("Deadlines", "Important dates that stay visible", Icons.Rounded.CalendarMonth, MaterialTheme.colorScheme.error) { onOpen(MoreDestination.DEADLINES) } }
+        item { SectionHeading("Review") }
+        item { MoreDestinationCard("Insights", "A neutral review of your execution", Icons.Rounded.Insights, MaterialTheme.colorScheme.primary) { onOpen(MoreDestination.INSIGHTS) } }
+        item { SectionHeading("App") }
+        item { MoreDestinationCard("Settings & backup", "Appearance, reminders and local data", Icons.Rounded.Settings, MaterialTheme.colorScheme.outline) { onOpen(MoreDestination.SETTINGS) } }
         item {
             SoftCard(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceVariant) {
                 Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -119,18 +127,19 @@ fun GoalsScreen(
     activities: List<GoalActivityEntity>,
     onBack: () -> Unit,
     onAdd: () -> Unit,
-    onOpen: (GoalEntity) -> Unit
+    onOpen: (GoalEntity) -> Unit,
+    onDelete: ((GoalEntity) -> Unit)? = null
 ) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Goals", "Something worth moving toward", onBack = onBack)
         if (goals.isEmpty()) {
             EmptyState("Define something worth moving toward.", "Goals can be milestones, intentions or longer outcomes—not just numbers.", "Create a goal", onAdd, Modifier.weight(1f), "✧")
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 26.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 item { SectionHeading("In motion", "New goal", onAdd) }
                 items(goals, key = { it.id }) { goal ->
                     val streak = goalStreak(goal.id, activities)
-                    SoftCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(23.dp), onClick = { onOpen(goal) }) {
+                    SoftCard(modifier = Modifier.fillMaxWidth().animateItem(), shape = RoundedCornerShape(23.dp), onClick = { onOpen(goal) }) {
                         Column(Modifier.padding(17.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(38.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = .11f)), contentAlignment = Alignment.Center) {
@@ -142,10 +151,16 @@ fun GoalsScreen(
                                     Text(goal.targetEpochDay?.let { "Target ${formatDay(it)}" } ?: "No target date", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Text("${goal.progress}%", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                                if (onDelete != null) {
+                                    Spacer(Modifier.width(4.dp))
+                                    IconButton(onClick = { onDelete(goal) }, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete goal", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), modifier = Modifier.size(18.dp))
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(13.dp))
                             androidx.compose.material3.LinearProgressIndicator(
-                                progress = goal.progress.coerceIn(0, 100) / 100f,
+                                progress = { goal.progress.coerceIn(0, 100) / 100f },
                                 modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .11f)
@@ -163,16 +178,22 @@ fun GoalsScreen(
 }
 
 @Composable
-fun ProjectsScreen(projects: List<ProjectEntity>, onBack: () -> Unit, onAdd: () -> Unit, onOpen: (ProjectEntity) -> Unit) {
+fun ProjectsScreen(
+    projects: List<ProjectEntity>,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onOpen: (ProjectEntity) -> Unit,
+    onDelete: ((ProjectEntity) -> Unit)? = null
+) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Projects", "Plans with more than one step", onBack = onBack)
         if (projects.isEmpty()) {
             EmptyState("Start with the next small step.", "Projects keep related tasks and milestones together, without adding project-management overhead.", "Create a project", onAdd, Modifier.weight(1f), "⌁")
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item { SectionHeading("Your projects", "New project", onAdd) }
                 items(projects, key = { it.id }) { project ->
-                    SoftCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(21.dp), onClick = { onOpen(project) }) {
+                    SoftCard(modifier = Modifier.fillMaxWidth().animateItem(), shape = RoundedCornerShape(21.dp), onClick = { onOpen(project) }) {
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(42.dp).clip(RoundedCornerShape(15.dp)).background(MaterialTheme.colorScheme.secondary.copy(alpha = .12f)), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Rounded.WorkOutline, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
@@ -183,6 +204,12 @@ fun ProjectsScreen(projects: List<ProjectEntity>, onBack: () -> Unit, onAdd: () 
                                 Text(project.targetEpochDay?.let { "Target ${formatDay(it)}" } ?: project.description.ifBlank { "In progress" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             TinyPill(project.status.lowercase().replaceFirstChar { it.titlecase() })
+                            if (onDelete != null) {
+                                Spacer(Modifier.width(4.dp))
+                                IconButton(onClick = { onDelete(project) }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete project", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), modifier = Modifier.size(18.dp))
+                                }
+                            }
                         }
                     }
                 }
@@ -192,20 +219,26 @@ fun ProjectsScreen(projects: List<ProjectEntity>, onBack: () -> Unit, onAdd: () 
 }
 
 @Composable
-fun CoursesScreen(courses: List<CourseEntity>, onBack: () -> Unit, onAdd: () -> Unit, onOpen: (CourseEntity) -> Unit) {
+fun CoursesScreen(
+    courses: List<CourseEntity>,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onOpen: (CourseEntity) -> Unit,
+    onDelete: ((CourseEntity) -> Unit)? = null
+) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Learning", "Courses, skills and programs", onBack = onBack)
         if (courses.isEmpty()) {
             EmptyState("Your learning space is ready.", "Keep an online course, certification or self-learning plan here. It works just as well offline.", "Add a course", onAdd, Modifier.weight(1f), "⌑")
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item { SectionHeading("Learning in progress", "Add course", onAdd) }
                 items(courses, key = { it.id }) { course ->
-                    SoftCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(21.dp), onClick = { onOpen(course) }) {
+                    SoftCard(modifier = Modifier.fillMaxWidth().animateItem(), shape = RoundedCornerShape(21.dp), onClick = { onOpen(course) }) {
                         Column(Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(42.dp).clip(RoundedCornerShape(15.dp)).background(Color(0xFFDAEEE8)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.MenuBook, contentDescription = null, tint = Color(0xFF528C80))
+                                Box(Modifier.size(42.dp).clip(RoundedCornerShape(15.dp)).background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
                                 }
                                 Spacer(Modifier.size(12.dp))
                                 Column(Modifier.weight(1f)) {
@@ -213,10 +246,16 @@ fun CoursesScreen(courses: List<CourseEntity>, onBack: () -> Unit, onAdd: () -> 
                                     Text(listOf(course.platform, course.category).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Self-paced learning" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                 }
                                 Text("${course.progress}%", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                                if (onDelete != null) {
+                                    Spacer(Modifier.width(4.dp))
+                                    IconButton(onClick = { onDelete(course) }, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete course", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), modifier = Modifier.size(18.dp))
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(12.dp))
                             androidx.compose.material3.LinearProgressIndicator(
-                                progress = course.progress.coerceIn(0, 100) / 100f,
+                                progress = { course.progress.coerceIn(0, 100) / 100f },
                                 modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .12f)
@@ -231,7 +270,14 @@ fun CoursesScreen(courses: List<CourseEntity>, onBack: () -> Unit, onAdd: () -> 
 }
 
 @Composable
-fun DeadlinesScreen(deadlines: List<DeadlineEntity>, onBack: () -> Unit, onAdd: () -> Unit, onOpen: (DeadlineEntity) -> Unit, onComplete: (DeadlineEntity) -> Unit) {
+fun DeadlinesScreen(
+    deadlines: List<DeadlineEntity>,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onOpen: (DeadlineEntity) -> Unit,
+    onComplete: (DeadlineEntity) -> Unit,
+    onDelete: ((DeadlineEntity) -> Unit)? = null
+) {
     val today = LocalDate.now().toEpochDay()
     val active = deadlines.filter { it.status != "COMPLETED" && !it.archived }.sortedBy { it.dueEpochDay }
     Column(Modifier.fillMaxSize()) {
@@ -239,17 +285,17 @@ fun DeadlinesScreen(deadlines: List<DeadlineEntity>, onBack: () -> Unit, onAdd: 
         if (active.isEmpty()) {
             EmptyState("Nothing pressing right now.", "Add an assignment, application, payment or personal commitment when a date matters.", "Add a deadline", onAdd, Modifier.weight(1f), "⚑")
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 6.dp, 18.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item { SectionHeading("Open deadlines", "Add deadline", onAdd) }
                 val overdue = active.filter { it.dueEpochDay < today }
                 val upcoming = active.filter { it.dueEpochDay >= today }
                 if (overdue.isNotEmpty()) {
                     item { Text("OVERDUE · ${overdue.size}", modifier = Modifier.padding(top = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, letterSpacing = .8f.sp) }
-                    items(overdue, key = { it.id }) { deadline -> DeadlineCard(deadline, true, onOpen, onComplete) }
+                    items(overdue, key = { it.id }) { deadline -> DeadlineCard(deadline, true, onOpen, onComplete, onDelete?.let { { it(deadline) } }, modifier = Modifier.animateItem()) }
                 }
                 if (upcoming.isNotEmpty()) {
                     item { Text("UPCOMING · ${upcoming.size}", modifier = Modifier.padding(top = 7.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = .8f.sp) }
-                    items(upcoming, key = { it.id }) { deadline -> DeadlineCard(deadline, false, onOpen, onComplete) }
+                    items(upcoming, key = { it.id }) { deadline -> DeadlineCard(deadline, false, onOpen, onComplete, onDelete?.let { { it(deadline) } }, modifier = Modifier.animateItem()) }
                 }
             }
         }
@@ -257,8 +303,15 @@ fun DeadlinesScreen(deadlines: List<DeadlineEntity>, onBack: () -> Unit, onAdd: 
 }
 
 @Composable
-private fun DeadlineCard(deadline: DeadlineEntity, overdue: Boolean, onOpen: (DeadlineEntity) -> Unit, onComplete: (DeadlineEntity) -> Unit) {
-    SoftCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), onClick = { onOpen(deadline) }) {
+private fun DeadlineCard(
+    deadline: DeadlineEntity,
+    overdue: Boolean,
+    onOpen: (DeadlineEntity) -> Unit,
+    onComplete: (DeadlineEntity) -> Unit,
+    onDelete: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    SoftCard(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), onClick = { onOpen(deadline) }) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(38.dp).clip(CircleShape).background(if (overdue) MaterialTheme.colorScheme.error.copy(alpha = .1f) else MaterialTheme.colorScheme.primary.copy(alpha = .1f)), contentAlignment = Alignment.Center) {
@@ -270,6 +323,12 @@ private fun DeadlineCard(deadline: DeadlineEntity, overdue: Boolean, onOpen: (De
                     Text(if (deadline.category.isBlank()) "Deadline" else deadline.category, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TinyPill(if (overdue) "${remainingLabel(deadline.dueEpochDay)}" else formatDay(deadline.dueEpochDay), tint = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                if (onDelete != null) {
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete deadline", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), modifier = Modifier.size(18.dp))
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -279,6 +338,16 @@ private fun DeadlineCard(deadline: DeadlineEntity, overdue: Boolean, onOpen: (De
         }
     }
 }
+
+private data class InsightsData(
+    val weekCompletions: List<TaskCompletionEntity>,
+    val completionRate: Int,
+    val daily: List<Pair<LocalDate, Int>>,
+    val maxValue: Int,
+    val mostProductive: LocalDate?,
+    val overdue: Int,
+    val avgDelay: Double
+)
 
 @Composable
 fun InsightsScreen(
@@ -290,33 +359,36 @@ fun InsightsScreen(
 ) {
     val today = LocalDate.now()
     val start = today.minusDays(6)
-    val weekCompletions = completions.filter { LocalDate.ofEpochDay(it.occurrenceDateEpochDay) in start..today }
-    val weekTasks = tasks.filter { task ->
-        task.dueEpochDay?.let { LocalDate.ofEpochDay(it) in start..today } == true
+    val insights = remember(tasks, completions, goals, activities, today) {
+        val wc = completions.filter { LocalDate.ofEpochDay(it.occurrenceDateEpochDay) in start..today }
+        val wt = tasks.filter { task ->
+            task.dueEpochDay?.let { LocalDate.ofEpochDay(it) in start..today } == true
+        }
+        val planned = (wt.map { it.id } + wc.map { it.taskId }).toSet().size
+        val completedCount = wc.map { it.taskId }.toSet().size
+        val cr = if (planned == 0) 0 else (completedCount * 100 / planned).coerceAtMost(100)
+        val d = (0L..6L).map { offset ->
+            val date = today.minusDays(6 - offset)
+            date to wc.count { it.occurrenceDateEpochDay == date.toEpochDay() }
+        }
+        val mv = (d.maxOfOrNull { it.second } ?: 0).coerceAtLeast(1)
+        val mp = d.maxByOrNull { it.second }?.takeIf { it.second > 0 }?.first
+        val od = tasks.count { it.status != "COMPLETED" && !it.archived && it.dueEpochDay?.let { day -> day < today.toEpochDay() } == true }
+        val ad = tasks.mapNotNull { task ->
+            val completedAt = task.completedAtMillis ?: return@mapNotNull null
+            val dueDay = task.dueEpochDay ?: return@mapNotNull null
+            java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(dueDay), Instant.ofEpochMilli(completedAt).atZone(ZoneId.systemDefault()).toLocalDate()).coerceAtLeast(0)
+        }.average()
+        InsightsData(wc, cr, d, mv, mp, od, ad)
     }
-    val planned = (weekTasks.map { it.id } + weekCompletions.map { it.taskId }).toSet().size
-    val completedCount = weekCompletions.map { it.taskId }.toSet().size
-    val completionRate = if (planned == 0) 0 else (completedCount * 100 / planned).coerceAtMost(100)
-    val daily = (0L..6L).map { offset ->
-        val date = today.minusDays(6 - offset)
-        date to weekCompletions.count { it.occurrenceDateEpochDay == date.toEpochDay() }
-    }
-    val maxValue = (daily.maxOfOrNull { it.second } ?: 0).coerceAtLeast(1)
-    val mostProductive = daily.maxByOrNull { it.second }?.takeIf { it.second > 0 }?.first
-    val overdue = tasks.count { it.status != "COMPLETED" && !it.archived && it.dueEpochDay?.let { day -> day < today.toEpochDay() } == true }
-    val avgDelay = tasks.mapNotNull { task ->
-        val completedAt = task.completedAtMillis ?: return@mapNotNull null
-        val dueDay = task.dueEpochDay ?: return@mapNotNull null
-        java.time.temporal.ChronoUnit.DAYS.between(LocalDate.ofEpochDay(dueDay), Instant.ofEpochMilli(completedAt).atZone(ZoneId.systemDefault()).toLocalDate()).coerceAtLeast(0)
-    }.average()
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Insights", "Patterns, not judgment", onBack = onBack)
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 7.dp, 18.dp, 30.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 7.dp, 18.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCard("${weekCompletions.size}", "completed · 7 days", Modifier.weight(1f))
-                    StatCard("$completionRate%", "completion rate", Modifier.weight(1f))
+                    StatCard("${insights.weekCompletions.size}", "completed · 7 days", Modifier.weight(1f))
+                    StatCard("${insights.completionRate}%", "completion rate", Modifier.weight(1f))
                 }
             }
             item {
@@ -325,13 +397,13 @@ fun InsightsScreen(
                         Text("COMPLETIONS THIS WEEK", style = MaterialTheme.typography.labelSmall, letterSpacing = .8f.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(17.dp))
                         Row(Modifier.fillMaxWidth().height(116.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                            daily.forEach { (date, count) ->
+                            insights.daily.forEach { (date, count) ->
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom, modifier = Modifier.weight(1f)) {
                                     Text(if (count == 0) "" else count.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(Modifier.height(5.dp))
                                     Box(
-                                        Modifier.width(18.dp).height((18 + 63f * count / maxValue).dp).clip(RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp))
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = if (date == mostProductive) .95f else .48f))
+                                        Modifier.width(18.dp).height((18 + 63f * count / insights.maxValue).dp).clip(RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = if (date == insights.mostProductive) .95f else .48f))
                                     )
                                     Spacer(Modifier.height(7.dp))
                                     Text(date.dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -343,8 +415,8 @@ fun InsightsScreen(
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCard("$overdue", "currently overdue", Modifier.weight(1f))
-                    StatCard(avgDelay.takeIf { !it.isNaN() }?.let { "${"%.1f".format(Locale.getDefault(), it)} d" } ?: "—", "avg. delay", Modifier.weight(1f))
+                    StatCard("${insights.overdue}", "currently overdue", Modifier.weight(1f))
+                    StatCard(insights.avgDelay.takeIf { !it.isNaN() }?.let { "${"%.1f".format(Locale.getDefault(), it)} d" } ?: "—", "avg. delay", Modifier.weight(1f))
                 }
             }
             item {

@@ -23,6 +23,7 @@ import com.daymark.app.data.MilestoneEntity
 import com.daymark.app.data.UserPreferencesEntity
 import com.daymark.app.data.CourseEntity
 import com.daymark.app.data.NotificationSoundEntity
+import com.daymark.app.data.RecurringDeleteScope
 import com.daymark.app.notifications.NotificationChannels
 import com.daymark.app.notifications.NotificationSoundImporter
 import com.daymark.app.notifications.ReminderScheduler
@@ -36,6 +37,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
+
+data class UserMessage(
+    val text: String,
+    val actionLabel: String? = null,
+    val action: (suspend () -> Unit)? = null
+)
 
 class DaymarkViewModel(
     private val app: Application,
@@ -55,11 +62,15 @@ class DaymarkViewModel(
     val sounds = repository.sounds.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recurrenceRules = repository.observeRecurrenceRules().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    private val _messages = MutableSharedFlow<UserMessage>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
     private val scheduler by lazy { ReminderScheduler(app) }
     private val errorHandler = CoroutineExceptionHandler { _, error ->
-        _messages.tryEmit(error.message?.takeIf { it.isNotBlank() } ?: "Daymark could not complete that action.")
+        _messages.tryEmit(UserMessage(error.message?.takeIf { it.isNotBlank() } ?: "Daymark could not complete that action."))
+    }
+
+    private suspend fun emitMessage(text: String, actionLabel: String? = null, action: (suspend () -> Unit)? = null) {
+        _messages.emit(UserMessage(text, actionLabel, action))
     }
 
     fun saveTask(
@@ -75,14 +86,35 @@ class DaymarkViewModel(
         repository.saveTask(task, frequency, interval, weekdaysMask, endEpochDay, occurrenceLimit, reminderOffsets, editScope)
         val summary = scheduler.rescheduleAll()
         if (reminderOffsets.isNotEmpty() && !NotificationManagerCompat.from(app).areNotificationsEnabled()) {
-            _messages.emit("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
+            emitMessage("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
         } else if (summary.inexactFallbacks > 0) {
-            _messages.emit("Saved. Android may deliver reminders less precisely until exact alarms are allowed.")
+            emitMessage("Saved. Android may deliver reminders less precisely until exact alarms are allowed.")
+        }
+    }
+
+    fun saveTaskWithSubtasks(
+        task: TaskEntity,
+        frequency: String,
+        interval: Int,
+        weekdaysMask: Int,
+        endEpochDay: Long?,
+        occurrenceLimit: Int?,
+        reminderOffsets: Set<Int>,
+        editScope: String = "THIS_OCCURRENCE",
+        subtasks: List<SubTaskEntity>
+    ) = launchSafe {
+        repository.saveTaskWithSubtasks(task, frequency, interval, weekdaysMask, endEpochDay, occurrenceLimit, reminderOffsets, editScope, subtasks)
+        val summary = scheduler.rescheduleAll()
+        if (reminderOffsets.isNotEmpty() && !NotificationManagerCompat.from(app).areNotificationsEnabled()) {
+            emitMessage("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
+        } else if (summary.inexactFallbacks > 0) {
+            emitMessage("Saved. Android may deliver reminders less precisely until exact alarms are allowed.")
         }
     }
 
     fun completeTask(taskId: String) = launchSafe {
         repository.completeTask(taskId)
+        scheduler.cancelPosted(DaymarkRepository.OWNER_TASK, taskId)
         scheduler.rescheduleAll()
     }
 
@@ -93,34 +125,140 @@ class DaymarkViewModel(
 
     fun archiveTask(taskId: String) = launchSafe {
         repository.archiveTask(taskId)
+        scheduler.cancelPosted(DaymarkRepository.OWNER_TASK, taskId)
         scheduler.rescheduleAll()
+        emitMessage("Task archived.")
+    }
+
+    fun deleteTask(taskId: String) = launchSafe {
+        val snapshot = repository.deleteTask(taskId) ?: return@launchSafe
+        scheduler.cancelPosted(DaymarkRepository.OWNER_TASK, taskId)
+        scheduler.rescheduleAll()
+        emitMessage(
+            text = "\"${snapshot.task.title}\" deleted",
+            actionLabel = "Undo",
+            action = {
+                repository.restoreTask(snapshot)
+                scheduler.rescheduleAll()
+            }
+        )
+    }
+
+    fun deleteRecurringTask(taskId: String, scope: RecurringDeleteScope) = launchSafe {
+        val snapshot = repository.deleteRecurringTask(taskId, scope) ?: return@launchSafe
+        scheduler.cancelPosted(DaymarkRepository.OWNER_TASK, taskId)
+        scheduler.rescheduleAll()
+        emitMessage(
+            text = "\"${snapshot.task.title}\" deleted",
+            actionLabel = "Undo",
+            action = {
+                repository.restoreTask(snapshot)
+                scheduler.rescheduleAll()
+            }
+        )
     }
 
     fun saveEvent(event: EventEntity, reminders: Set<Int>) = launchSafe {
         repository.saveEvent(event, reminders)
         scheduler.rescheduleAll()
         if (reminders.isNotEmpty() && !NotificationManagerCompat.from(app).areNotificationsEnabled()) {
-            _messages.emit("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
+            emitMessage("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
         }
+    }
+
+    fun deleteEvent(id: String) = launchSafe {
+        val snapshot = repository.deleteEvent(id) ?: return@launchSafe
+        scheduler.cancelPosted(DaymarkRepository.OWNER_EVENT, id)
+        scheduler.rescheduleAll()
+        emitMessage(
+            text = "\"${snapshot.event.title}\" deleted",
+            actionLabel = "Undo",
+            action = {
+                repository.restoreEvent(snapshot)
+                scheduler.rescheduleAll()
+            }
+        )
     }
 
     fun saveDeadline(deadline: DeadlineEntity, reminders: Set<Int>) = launchSafe {
         repository.saveDeadline(deadline, reminders)
         scheduler.rescheduleAll()
         if (reminders.isNotEmpty() && !NotificationManagerCompat.from(app).areNotificationsEnabled()) {
-            _messages.emit("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
+            emitMessage("Saved, but notifications are off. Enable them in Settings to receive this reminder.")
         }
     }
 
     fun completeDeadline(id: String) = launchSafe {
         repository.completeDeadline(id)
+        scheduler.cancelPosted(DaymarkRepository.OWNER_DEADLINE, id)
         scheduler.rescheduleAll()
     }
 
+    fun deleteDeadline(id: String) = launchSafe {
+        val snapshot = repository.deleteDeadline(id) ?: return@launchSafe
+        scheduler.cancelPosted(DaymarkRepository.OWNER_DEADLINE, id)
+        scheduler.rescheduleAll()
+        emitMessage(
+            text = "\"${snapshot.deadline.title}\" deleted",
+            actionLabel = "Undo",
+            action = {
+                repository.restoreDeadline(snapshot)
+                scheduler.rescheduleAll()
+            }
+        )
+    }
+
     fun saveNote(note: NoteEntity) = launchSafe { repository.saveNote(note) }
+
+    fun deleteNote(id: String) = launchSafe {
+        val snapshot = repository.deleteNote(id) ?: return@launchSafe
+        emitMessage(
+            text = "\"${snapshot.note.title.ifBlank { "Note" }}\" deleted",
+            actionLabel = "Undo",
+            action = { repository.restoreNote(snapshot) }
+        )
+    }
+
     fun saveGoal(goal: GoalEntity) = launchSafe { repository.saveGoal(goal) }
+
+    fun deleteGoal(id: String) = launchSafe {
+        val snapshot = repository.deleteGoal(id) ?: return@launchSafe
+        emitMessage(
+            text = "\"${snapshot.goal.title}\" deleted",
+            actionLabel = "Undo",
+            action = { repository.restoreGoal(snapshot) }
+        )
+    }
+
     fun saveProject(project: ProjectEntity) = launchSafe { repository.saveProject(project) }
+
+    fun saveProjectWithMilestones(project: ProjectEntity, milestones: List<MilestoneEntity>) = launchSafe {
+        repository.saveProjectWithMilestones(project, milestones)
+    }
+
+    fun deleteProject(id: String) = launchSafe {
+        val snapshot = repository.deleteProject(id) ?: return@launchSafe
+        emitMessage(
+            text = "\"${snapshot.project.title}\" deleted",
+            actionLabel = "Undo",
+            action = { repository.restoreProject(snapshot) }
+        )
+    }
+
     fun saveCourse(course: CourseEntity) = launchSafe { repository.saveCourse(course) }
+
+    fun saveCourseWithModules(course: CourseEntity, modules: List<CourseModuleEntity>) = launchSafe {
+        repository.saveCourseWithModules(course, modules)
+    }
+
+    fun deleteCourse(id: String) = launchSafe {
+        val snapshot = repository.deleteCourse(id) ?: return@launchSafe
+        emitMessage(
+            text = "\"${snapshot.course.title}\" deleted",
+            actionLabel = "Undo",
+            action = { repository.restoreCourse(snapshot) }
+        )
+    }
 
     suspend fun getSubtasks(taskId: String): List<SubTaskEntity> = repository.getSubtasks(taskId)
     fun observeSubtasks(taskId: String) = repository.observeSubtasks(taskId)
@@ -148,6 +286,27 @@ class DaymarkViewModel(
 
     fun savePreferences(value: UserPreferencesEntity) = launchSafe { repository.savePreference(value) }
 
+    fun setTheme(themeKey: String) = launchSafe {
+        repository.savePreference(preferences.value.copy(themeKey = themeKey))
+    }
+
+    fun setAccent(accentKey: String) = launchSafe {
+        repository.savePreference(preferences.value.copy(accentKey = accentKey))
+    }
+
+    fun setUse24HourClock(enabled: Boolean) = launchSafe {
+        repository.savePreference(preferences.value.copy(use24HourClock = enabled))
+    }
+
+    fun setLoudReminders(enabled: Boolean) = launchSafe {
+        repository.savePreference(preferences.value.copy(loudReminders = enabled))
+        val soundId = preferences.value.notificationSoundId
+        val sound = repository.getSound(soundId)
+        val imported = sound?.takeIf { !it.isBuiltIn }?.contentUri?.let { Uri.parse(it) }
+        NotificationChannels.ensureChannel(app, soundId, imported, loud = enabled)
+        scheduler.rescheduleAll()
+    }
+
     fun updateDashboard(item: DashboardConfigurationEntity) = launchSafe {
         repository.saveDashboardItem(item)
     }
@@ -172,7 +331,7 @@ class DaymarkViewModel(
         val imported = selected?.takeIf { !it.isBuiltIn }?.contentUri?.let { Uri.parse(it) }
         NotificationChannels.ensureChannel(app, soundId, imported)
         repository.savePreference(preferences.value.copy(notificationSoundId = soundId))
-        _messages.emit("Reminder sound updated. Android keeps channel sound settings separately.")
+        emitMessage("Reminder sound updated. Android keeps channel sound settings separately.")
     }
 
     fun importSound(uri: Uri) = launchSafe {
@@ -180,14 +339,14 @@ class DaymarkViewModel(
         repository.saveSound(sound)
         NotificationChannels.ensureChannel(app, sound.soundId, Uri.parse(sound.contentUri))
         repository.savePreference(preferences.value.copy(notificationSoundId = sound.soundId))
-        _messages.emit("${sound.name} is ready for Daymark reminders.")
+        emitMessage("${sound.name} is ready for Daymark reminders.")
     }
 
     fun sendTestNotification() = launchSafe {
         val soundId = preferences.value.notificationSoundId
         val imported = repository.getSound(soundId)?.takeIf { !it.isBuiltIn }?.contentUri?.let { Uri.parse(it) }
         val sent = NotificationChannels.postTest(app, soundId, imported)
-        _messages.emit(if (sent) "Test notification sent." else "Allow Daymark notifications to test this sound.")
+        emitMessage(if (sent) "Test notification sent." else "Allow Daymark notifications to test this sound.")
     }
 
     suspend fun search(query: String): List<SearchResult> = withContext(Dispatchers.IO) {
@@ -204,19 +363,19 @@ class DaymarkViewModel(
 
     fun exportBackup(uri: Uri) = launchSafe {
         BackupManager(repository.database(), app.contentResolver).export(uri)
-        _messages.emit("Backup exported successfully.")
+        emitMessage("Backup exported successfully.")
     }
 
     fun restoreBackup(uri: Uri) = launchSafe {
         BackupManager(repository.database(), app.contentResolver).restore(uri)
         scheduler.rescheduleAll()
-        _messages.emit("Backup restored. Your local data is ready.")
+        emitMessage("Backup restored. Your local data is ready.")
     }
 
     fun resetApplicationData() = launchSafe {
         withContext(Dispatchers.IO) { repository.resetAllData() }
         scheduler.rescheduleAll()
-        _messages.emit("Daymark data was reset.")
+        emitMessage("Daymark data was reset.")
     }
 
     fun refreshReminders() = launchSafe { scheduler.rescheduleAll() }
@@ -226,7 +385,7 @@ class DaymarkViewModel(
             try {
                 block()
             } catch (error: Exception) {
-                _messages.emit(error.message?.takeIf { it.isNotBlank() } ?: "Daymark could not complete that action.")
+                emitMessage(error.message?.takeIf { it.isNotBlank() } ?: "Daymark could not complete that action.")
             }
         }
     }

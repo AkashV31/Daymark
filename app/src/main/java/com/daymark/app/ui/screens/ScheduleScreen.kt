@@ -65,8 +65,18 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 
+private const val MAX_EXPANSION = 180
 private enum class ScheduleView(val label: String) { DAY("Day"), THREE_DAYS("3 days"), WEEK("Week"), MONTH("Month"), AGENDA("Agenda") }
-private data class ScheduleRow(val id: String, val title: String, val detail: String, val day: Long, val minute: Int?, val type: String, val complete: Boolean)
+private data class ScheduleRow(
+    val id: String,
+    val title: String,
+    val detail: String,
+    val day: Long,
+    val minute: Int?,
+    val type: String,
+    val complete: Boolean,
+    val key: String = "$type-$id-$day"
+)
 
 @Composable
 fun ScheduleScreen(
@@ -116,9 +126,9 @@ fun ScheduleScreen(
             if (rule != null) {
                 var cursor = LocalDate.ofEpochDay(dueDay)
                 var idx = task.occurrenceIndex
-                while (true) {
-                    val next = RecurrenceEngine.nextOccurrence(cursor, rule, currentOccurrenceIndex = idx) ?: break
-                    if (next.toEpochDay() >= endDay) break
+                repeat(MAX_EXPANSION) {
+                    val next = RecurrenceEngine.nextOccurrence(cursor, rule, currentOccurrenceIndex = idx) ?: return@repeat
+                    if (next.toEpochDay() >= endDay) return@repeat
                     if (next.toEpochDay() >= startDay && next.toEpochDay() != dueDay) {
                         list.add(ScheduleRow(task.id, task.title, task.category.ifBlank { "Task" }, next.toEpochDay(), task.dueMinuteOfDay, "TASK", false))
                     }
@@ -130,18 +140,25 @@ fun ScheduleScreen(
         list
     }
 
-    val visibleEvents = events.filter {
-        !it.archived && it.startEpochDay >= start.toEpochDay() && it.startEpochDay < end.toEpochDay()
+    val startDay = start.toEpochDay()
+    val endDay = end.toEpochDay()
+    val visibleEvents = remember(events, startDay, endDay) {
+        events.filter {
+            !it.archived && it.startEpochDay >= startDay && it.startEpochDay < endDay
+        }
     }
-    val visibleDeadlines = deadlines.filter {
-        !it.archived && it.status != "COMPLETED" && it.dueEpochDay >= start.toEpochDay() && it.dueEpochDay < end.toEpochDay()
+    val visibleDeadlines = remember(deadlines, startDay, endDay) {
+        deadlines.filter {
+            !it.archived && it.status != "COMPLETED" && it.dueEpochDay >= startDay && it.dueEpochDay < endDay
+        }
     }
-    val rows = buildList {
-        addAll(visibleTasks)
-        visibleEvents.forEach { add(ScheduleRow(it.id, it.title, it.category.ifBlank { "Event" }, it.startEpochDay, if (it.isAllDay) null else it.startMinuteOfDay, "EVENT", false)) }
-        visibleDeadlines.forEach { add(ScheduleRow(it.id, it.title, it.category.ifBlank { "Deadline" }, it.dueEpochDay, it.dueMinuteOfDay, "DEADLINE", false)) }
-    }.sortedWith(compareBy<ScheduleRow> { it.day }.thenBy { it.minute == null }.thenBy { it.minute ?: Int.MAX_VALUE })
-
+    val rows = remember(visibleTasks, visibleEvents, visibleDeadlines) {
+        buildList {
+            addAll(visibleTasks)
+            visibleEvents.forEach { add(ScheduleRow(it.id, it.title, it.category.ifBlank { "Event" }, it.startEpochDay, if (it.isAllDay) null else it.startMinuteOfDay, "EVENT", false)) }
+            visibleDeadlines.forEach { add(ScheduleRow(it.id, it.title, it.category.ifBlank { "Deadline" }, it.dueEpochDay, it.dueMinuteOfDay, "DEADLINE", false)) }
+        }.sortedWith(compareBy<ScheduleRow> { it.day }.thenBy { it.minute == null }.thenBy { it.minute ?: Int.MAX_VALUE })
+    }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Schedule", if (view == ScheduleView.AGENDA) "The next 30 days" else formatLongDate(selectedEpochDay), onSearch = onSearch)
         Row(
@@ -157,8 +174,8 @@ fun ScheduleScreen(
                 month = selectedDate,
                 selected = selectedDate,
                 onSelect = { selectedEpochDay = it.toEpochDay() },
-                onPrevious = { selectedEpochDay = selectedDate.minusMonths(1).toEpochDay() },
-                onNext = { selectedEpochDay = selectedDate.plusMonths(1).toEpochDay() },
+                onPrevious = { selectedEpochDay = selectedDate.withDayOfMonth(1).minusMonths(1).toEpochDay() },
+                onNext = { selectedEpochDay = selectedDate.withDayOfMonth(1).plusMonths(1).toEpochDay() },
                 eventDays = visibleEvents.map { it.startEpochDay }.toSet() + visibleTasks.map { it.day }.toSet() + visibleDeadlines.map { it.dueEpochDay }.toSet()
             )
         } else if (view != ScheduleView.AGENDA) {
@@ -184,7 +201,7 @@ fun ScheduleScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 var priorDay: Long? = null
@@ -199,7 +216,7 @@ fun ScheduleScreen(
                             )
                         }
                     }
-                    item("${row.type}-${row.id}") {
+                    item(key = row.key) {
                         ScheduleTimelineRow(
                             row = row,
                             use24HourClock = preferences.use24HourClock,

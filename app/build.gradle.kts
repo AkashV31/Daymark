@@ -14,20 +14,23 @@ android {
         applicationId = "com.daymark.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
     val releaseKeyStore = rootProject.file("daymark-release.jks")
-    if (releaseKeyStore.exists()) {
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val keyPassword = System.getenv("KEY_PASSWORD")
+    val hasReleaseSigning = releaseKeyStore.exists() && !keystorePassword.isNullOrBlank() && !keyPassword.isNullOrBlank()
+    if (hasReleaseSigning) {
         signingConfigs {
             create("release") {
                 storeFile = releaseKeyStore
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "daymark123"
+                storePassword = keystorePassword
                 keyAlias = System.getenv("KEY_ALIAS") ?: "daymark"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "daymark123"
+                this.keyPassword = keyPassword
             }
         }
     }
@@ -36,7 +39,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            if (releaseKeyStore.exists()) {
+            if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
             proguardFiles(

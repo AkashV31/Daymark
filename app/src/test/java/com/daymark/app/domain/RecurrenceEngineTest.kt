@@ -45,15 +45,41 @@ class RecurrenceEngineTest {
         assertEquals(LocalDate.of(2026, 2, 28), RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 1, 31), rule))
     }
 
+    @Test fun monthlyRecurrenceAcrossJanFebMarPreservesAnchorDay() {
+        val seriesStart = LocalDate.of(2026, 1, 31)
+        val rule = RecurrenceRuleEntity(frequency = RecurrenceEngine.MONTHLY, interval = 1)
+        val feb = RecurrenceEngine.nextOccurrence(seriesStart, rule, seriesStart)
+        assertEquals(LocalDate.of(2026, 2, 28), feb)
+
+        val mar = RecurrenceEngine.nextOccurrence(feb!!, rule, seriesStart)
+        assertEquals(LocalDate.of(2026, 3, 31), mar)
+
+        val apr = RecurrenceEngine.nextOccurrence(mar!!, rule, seriesStart)
+        assertEquals(LocalDate.of(2026, 4, 30), apr)
+
+        val may = RecurrenceEngine.nextOccurrence(apr!!, rule, seriesStart)
+        assertEquals(LocalDate.of(2026, 5, 31), may)
+    }
+
     @Test fun occurrenceLimitStopsAfterConfiguredCount() {
         val rule = RecurrenceRuleEntity(frequency = RecurrenceEngine.DAILY, occurrenceLimit = 2)
         assertEquals(LocalDate.of(2026, 10, 3), RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 10, 2), rule, currentOccurrenceIndex = 0))
         assertNull(RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 10, 3), rule, currentOccurrenceIndex = 1))
     }
 
+    @Test fun occurrenceLimitZeroOrNegativeReturnsNull() {
+        val rule = RecurrenceRuleEntity(frequency = RecurrenceEngine.DAILY, occurrenceLimit = 1)
+        assertNull(RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 10, 2), rule, currentOccurrenceIndex = 0))
+    }
+
     @Test fun endDateIsInclusiveButNoOccurrenceAfterIt() {
         val rule = RecurrenceRuleEntity(frequency = RecurrenceEngine.DAILY, endEpochDay = LocalDate.of(2026, 10, 4).toEpochDay())
         assertEquals(LocalDate.of(2026, 10, 4), RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 10, 3), rule))
         assertNull(RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 10, 4), rule))
+    }
+
+    @Test fun endDateBeforeNextReturnsNull() {
+        val rule = RecurrenceRuleEntity(frequency = RecurrenceEngine.DAILY, endEpochDay = LocalDate.of(2026, 10, 2).toEpochDay())
+        assertNull(RecurrenceEngine.nextOccurrence(LocalDate.of(2026, 10, 2), rule))
     }
 }

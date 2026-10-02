@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +68,14 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 private data class NextItem(val title: String, val time: Int?, val type: String, val detail: String)
+private data class TaskMetrics(
+    val openTasks: List<TaskEntity>,
+    val todayOpen: List<TaskEntity>,
+    val completedToday: List<TaskEntity>,
+    val totalToday: Int,
+    val progress: Float,
+    val overdueTasks: Int
+)
 
 @Composable
 fun HomeScreen(
@@ -91,45 +100,67 @@ fun HomeScreen(
     onOpenDeadline: (DeadlineEntity) -> Unit,
     onCreateTask: () -> Unit
 ) {
-    val today = LocalDate.now()
-    val todayEpoch = today.toEpochDay()
-    val openTasks = tasks.filter { !it.archived && it.status != "COMPLETED" && it.status != "SKIPPED" }
-    val todayOpen = openTasks.filter { it.dueEpochDay == todayEpoch }
-    val completedToday = tasks.filter {
-        it.status == "COMPLETED" && it.completedAtMillis?.let { millis ->
-            Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate() == today
-        } == true
+    val today = remember { LocalDate.now() }
+    val todayEpoch = remember(today) { today.toEpochDay() }
+    val metrics = remember(tasks, today, todayEpoch) {
+        val open = tasks.filter { !it.archived && it.status != "COMPLETED" && it.status != "SKIPPED" }
+        val tOpen = open.filter { it.dueEpochDay == todayEpoch }
+        val comp = tasks.filter {
+            it.status == "COMPLETED" && it.completedAtMillis?.let { millis ->
+                Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate() == today
+            } == true
+        }
+        val tot = tOpen.size + comp.count { completed -> tOpen.none { it.id == completed.id } }
+        val prog = if (tot == 0) 0f else comp.size.coerceAtMost(tot).toFloat() / tot
+        val overdue = open.count { it.dueEpochDay != null && it.dueEpochDay < todayEpoch }
+        TaskMetrics(open, tOpen, comp, tot, prog, overdue)
     }
-    val totalToday = todayOpen.size + completedToday.count { completed -> todayOpen.none { it.id == completed.id } }
-    val progress = if (totalToday == 0) 0f else completedToday.size.coerceAtMost(totalToday).toFloat() / totalToday
-    val overdueTasks = openTasks.count { it.dueEpochDay != null && it.dueEpochDay < todayEpoch }
-    val todaysEvents = events.filter { !it.archived && it.startEpochDay == todayEpoch }
-    val upcomingDeadlines = deadlines.filter { !it.archived && it.status != "COMPLETED" }
-        .sortedWith(compareBy<DeadlineEntity> { it.dueEpochDay < todayEpoch }.thenBy { it.dueEpochDay }.thenBy { it.dueMinuteOfDay ?: 1439 })
-        .take(3)
-    val nextItem = buildList {
-        todayOpen.forEach { task ->
-            task.dueMinuteOfDay?.let { minute ->
-                if (minute >= LocalTime.now().hour * 60 + LocalTime.now().minute) {
-                    add(NextItem(task.title, minute, task.category.ifBlank { "Task" }, formatDay(todayEpoch)))
+    val openTasks = metrics.openTasks
+    val todayOpen = metrics.todayOpen
+    val completedToday = metrics.completedToday
+    val totalToday = metrics.totalToday
+    val progress = metrics.progress
+    val overdueTasks = metrics.overdueTasks
+
+    val todaysEvents = remember(events, todayEpoch) {
+        events.filter { !it.archived && it.startEpochDay == todayEpoch }
+    }
+    val upcomingDeadlines = remember(deadlines, todayEpoch) {
+        deadlines.filter { !it.archived && it.status != "COMPLETED" }
+            .sortedWith(compareBy<DeadlineEntity> { it.dueEpochDay < todayEpoch }.thenBy { it.dueEpochDay }.thenBy { it.dueMinuteOfDay ?: 1439 })
+            .take(3)
+    }
+    val currentMinute = remember {
+        val now = LocalTime.now()
+        now.hour * 60 + now.minute
+    }
+    val nextItem = remember(todayOpen, todaysEvents, currentMinute, todayEpoch) {
+        buildList {
+            todayOpen.forEach { task ->
+                task.dueMinuteOfDay?.let { minute ->
+                    if (minute >= currentMinute) {
+                        add(NextItem(task.title, minute, task.category.ifBlank { "Task" }, formatDay(todayEpoch)))
+                    }
                 }
             }
-        }
-        todaysEvents.forEach { event ->
-            val minute = event.startMinuteOfDay
-            if (minute == null || minute >= LocalTime.now().hour * 60 + LocalTime.now().minute) {
-                add(NextItem(event.title, minute, "On your schedule", if (event.isAllDay) "All day" else formatDay(todayEpoch)))
+            todaysEvents.forEach { event ->
+                val minute = event.startMinuteOfDay
+                if (minute == null || minute >= currentMinute) {
+                    add(NextItem(event.title, minute, "On your schedule", if (event.isAllDay) "All day" else formatDay(todayEpoch)))
+                }
             }
-        }
-    }.sortedBy { it.time ?: Int.MAX_VALUE }.firstOrNull()
+        }.sortedBy { it.time ?: Int.MAX_VALUE }.firstOrNull()
+    }
 
-    val widgetList = (dashboard.ifEmpty { DashboardWidgets.defaults })
-        .sortedBy { it.position }
-        .filter { it.isVisible }
+    val widgetList = remember(dashboard) {
+        (dashboard.ifEmpty { DashboardWidgets.defaults })
+            .sortedBy { it.position }
+            .filter { it.isVisible }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(17.dp)
     ) {
         item("home-header") {
@@ -230,7 +261,7 @@ fun HomeScreen(
                                 Text("${goal.progress}%", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                             }
                             androidx.compose.material3.LinearProgressIndicator(
-                                progress = goal.progress.coerceIn(0, 100) / 100f,
+                                progress = { goal.progress.coerceIn(0, 100) / 100f },
                                 modifier = Modifier.fillMaxWidth().padding(start = 17.dp, end = 17.dp, bottom = 17.dp).height(5.dp).clip(CircleShape),
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .12f)
@@ -307,9 +338,11 @@ private fun TodayProgressCard(
     onClick: () -> Unit
 ) {
     val tint = MaterialTheme.colorScheme.primary
+    val surfaceVar = MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
-            .background(Brush.linearGradient(listOf(tint.copy(alpha = .14f), Color(0xFFDAE7F5).copy(alpha = .72f))))
+            .background(Brush.linearGradient(listOf(tint.copy(alpha = .14f), surfaceVar.copy(alpha = .72f))))
+            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 19.dp),
@@ -327,7 +360,7 @@ private fun TodayProgressCard(
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     TinyPill("$scheduledCount scheduled", tint = MaterialTheme.colorScheme.secondary)
-                    if (overdueCount > 0) TinyPill("$overdueCount overdue", tint = Color(0xFFB66F78))
+                    if (overdueCount > 0) TinyPill("$overdueCount overdue", tint = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.height(13.dp))
                 Text(
@@ -386,7 +419,7 @@ private fun DeadlineRow(deadline: DeadlineEntity, onClick: () -> Unit) {
             Text(
                 if (deadline.dueEpochDay < today) remainingLabel(deadline.dueEpochDay, deadline.dueMinuteOfDay) else formatDay(deadline.dueEpochDay),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (deadline.dueEpochDay < today) Color(0xFFB66F78) else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (deadline.dueEpochDay < today) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Text(formatTime(deadline.dueMinuteOfDay), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -397,8 +430,8 @@ private fun DeadlineRow(deadline: DeadlineEntity, onClick: () -> Unit) {
 private fun CourseMiniCard(course: CourseEntity, onClick: () -> Unit) {
     SoftCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).clip(RoundedCornerShape(15.dp)).background(Color(0xFFE4F2F0)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.MenuBook, contentDescription = null, tint = Color(0xFF528C80))
+            Box(Modifier.size(42.dp).clip(RoundedCornerShape(15.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
             }
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {

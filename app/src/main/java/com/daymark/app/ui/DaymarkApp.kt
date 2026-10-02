@@ -6,10 +6,16 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -19,6 +25,8 @@ import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Notes
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -26,9 +34,12 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +67,7 @@ import com.daymark.app.data.SearchResult
 import com.daymark.app.data.TaskEntity
 import com.daymark.app.data.UserPreferencesEntity
 import com.daymark.app.data.CourseEntity
+import com.daymark.app.data.RecurringDeleteScope
 import com.daymark.app.ui.MoreDestination
 import com.daymark.app.ui.screens.CoursesScreen
 import com.daymark.app.ui.screens.DeadlinesScreen
@@ -84,6 +96,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 private enum class MainTab(val label: String) { HOME("Home"), SCHEDULE("Schedule"), TASKS("Tasks"), NOTES("Notes"), MORE("More") }
 
+private sealed class DeleteConfirmation {
+    data class Goal(val goal: GoalEntity) : DeleteConfirmation()
+    data class Project(val project: ProjectEntity) : DeleteConfirmation()
+    data class Course(val course: CourseEntity) : DeleteConfirmation()
+}
+
 @Composable
 fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow<Pair<String, String>?>) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
@@ -105,7 +123,20 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTabName by rememberSaveable { mutableStateOf(MainTab.HOME.name) }
-    var moreDestinationName by rememberSaveable { mutableStateOf(MoreDestination.HUB.name) }
+    var moreBackStack by rememberSaveable { mutableStateOf(listOf(MoreDestination.HUB.name)) }
+    val moreDestinationName = moreBackStack.lastOrNull() ?: MoreDestination.HUB.name
+    val moreDestination = MoreDestination.entries.firstOrNull { it.name == moreDestinationName } ?: MoreDestination.HUB
+
+    fun pushMore(dest: MoreDestination) {
+        moreBackStack = moreBackStack + dest.name
+    }
+    fun popMore(): Boolean {
+        return if (moreBackStack.size > 1) {
+            moreBackStack = moreBackStack.dropLast(1)
+            true
+        } else false
+    }
+
     var addSheetOpen by remember { mutableStateOf(false) }
     var searchSheetOpen by remember { mutableStateOf(false) }
     var editorKind by remember { mutableStateOf<CreateKind?>(null) }
@@ -116,8 +147,47 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
     var editingGoal by remember { mutableStateOf<GoalEntity?>(null) }
     var editingProject by remember { mutableStateOf<ProjectEntity?>(null) }
     var editingCourse by remember { mutableStateOf<CourseEntity?>(null) }
+
+    var deleteConfirmation by remember { mutableStateOf<DeleteConfirmation?>(null) }
+    var recurringDeleteTarget by remember { mutableStateOf<TaskEntity?>(null) }
+
+    fun requestDeleteTask(task: TaskEntity) {
+        if (task.seriesId != null || task.recurrenceRuleId != null) {
+            recurringDeleteTarget = task
+        } else {
+            viewModel.deleteTask(task.id)
+        }
+    }
+
     val selectedTab = MainTab.entries.firstOrNull { it.name == selectedTabName } ?: MainTab.HOME
-    val moreDestination = MoreDestination.entries.firstOrNull { it.name == moreDestinationName } ?: MoreDestination.HUB
+
+    val closeEditor = {
+        editorKind = null
+        editingTask = null
+        editingEvent = null
+        editingDeadline = null
+        editingNote = null
+        editingGoal = null
+        editingProject = null
+        editingCourse = null
+    }
+
+    val canHandleBack = addSheetOpen || searchSheetOpen || editorKind != null ||
+        deleteConfirmation != null || recurringDeleteTarget != null ||
+        (selectedTab == MainTab.MORE && moreBackStack.size > 1) ||
+        selectedTab != MainTab.HOME
+
+    BackHandler(enabled = canHandleBack) {
+        when {
+            addSheetOpen -> addSheetOpen = false
+            searchSheetOpen -> searchSheetOpen = false
+            editorKind != null -> closeEditor()
+            deleteConfirmation != null -> deleteConfirmation = null
+            recurringDeleteTarget != null -> recurringDeleteTarget = null
+            selectedTab == MainTab.MORE && moreBackStack.size > 1 -> popMore()
+            selectedTab != MainTab.HOME -> selectedTabName = MainTab.HOME.name
+        }
+    }
 
     var notificationEnabled by remember { mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled()) }
     var exactAlarmsAllowed by remember { mutableStateOf(exactAlarmPermission(context)) }
@@ -134,14 +204,30 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
     }
 
     LaunchedEffect(viewModel) {
-        viewModel.messages.collect { message -> snackbarHostState.showSnackbar(message) }
+        viewModel.messages.collect { message ->
+            if (message.actionLabel != null && message.action != null) {
+                val result = snackbarHostState.showSnackbar(
+                    message = message.text,
+                    actionLabel = message.actionLabel,
+                    duration = SnackbarDuration.Short
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    message.action.invoke()
+                }
+            } else {
+                snackbarHostState.showSnackbar(
+                    message = message.text,
+                    duration = SnackbarDuration.Short
+                )
+            }
+        }
     }
     LaunchedEffect(target) {
         target?.first?.let { type ->
             selectedTabName = when (type) {
                 "TASK" -> MainTab.TASKS.name
                 "EVENT" -> MainTab.SCHEDULE.name
-                "DEADLINE" -> MainTab.MORE.name.also { moreDestinationName = MoreDestination.DEADLINES.name }
+                "DEADLINE" -> MainTab.MORE.name.also { moreBackStack = listOf(MoreDestination.HUB.name, MoreDestination.DEADLINES.name) }
                 else -> MainTab.HOME.name
             }
         }
@@ -149,10 +235,11 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
     LaunchedEffect(target, tasks, events, deadlines) {
         val request = target ?: return@LaunchedEffect
         when (request.first) {
-            "TASK" -> tasks.firstOrNull { it.id == request.second }?.let { editingTask = it; editorKind = CreateKind.TASK; notificationTarget.value = null }
-            "EVENT" -> events.firstOrNull { it.id == request.second }?.let { editingEvent = it; editorKind = CreateKind.EVENT; notificationTarget.value = null }
-            "DEADLINE" -> deadlines.firstOrNull { it.id == request.second }?.let { editingDeadline = it; editorKind = CreateKind.DEADLINE; notificationTarget.value = null }
+            "TASK" -> tasks.firstOrNull { it.id == request.second }?.let { editingTask = it; editorKind = CreateKind.TASK }
+            "EVENT" -> events.firstOrNull { it.id == request.second }?.let { editingEvent = it; editorKind = CreateKind.EVENT }
+            "DEADLINE" -> deadlines.firstOrNull { it.id == request.second }?.let { editingDeadline = it; editorKind = CreateKind.DEADLINE }
         }
+        notificationTarget.value = null
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -169,7 +256,7 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
         if (uri != null) viewModel.importSound(uri)
     }
 
-    DaymarkTheme(preferences.themeKey) {
+    DaymarkTheme(preferences.themeKey, preferences.accentKey) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
@@ -191,7 +278,7 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                             selected = selectedTab == tab,
                             onClick = {
                                 selectedTabName = tab.name
-                                if (tab == MainTab.MORE) moreDestinationName = MoreDestination.HUB.name
+                                if (tab == MainTab.MORE) moreBackStack = listOf(MoreDestination.HUB.name)
                             },
                             icon = {
                                 val icon = when (tab) {
@@ -216,7 +303,15 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                 }
             }
         ) { padding ->
-            Crossfade(targetState = selectedTab, modifier = Modifier.fillMaxSize().padding(padding), label = "Daymark section") { tab ->
+            AnimatedContent(
+                targetState = selectedTab,
+                modifier = Modifier.fillMaxSize().padding(padding),
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 60)) togetherWith
+                        fadeOut(animationSpec = tween(durationMillis = 150))
+                },
+                label = "Daymark section"
+            ) { tab ->
                 when (tab) {
                     MainTab.HOME -> HomeScreen(
                         tasks = tasks, events = events, deadlines = deadlines, goals = goals,
@@ -225,13 +320,13 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                         onSearch = { searchSheetOpen = true },
                         onOpenTasks = { selectedTabName = MainTab.TASKS.name },
                         onOpenSchedule = { selectedTabName = MainTab.SCHEDULE.name },
-                        onOpenGoals = { selectedTabName = MainTab.MORE.name; moreDestinationName = MoreDestination.GOALS.name },
-                        onOpenCourses = { selectedTabName = MainTab.MORE.name; moreDestinationName = MoreDestination.COURSES.name },
+                        onOpenGoals = { selectedTabName = MainTab.MORE.name; moreBackStack = listOf(MoreDestination.HUB.name, MoreDestination.GOALS.name) },
+                        onOpenCourses = { selectedTabName = MainTab.MORE.name; moreBackStack = listOf(MoreDestination.HUB.name, MoreDestination.COURSES.name) },
                         onOpenNotes = { selectedTabName = MainTab.NOTES.name },
                         onToggleTask = { task -> if (task.status == "COMPLETED") viewModel.uncompleteTask(task.id) else viewModel.completeTask(task.id) },
                         onOpenTask = { editingTask = it; editorKind = CreateKind.TASK },
                         onOpenEvent = { editingEvent = it; editorKind = CreateKind.EVENT },
-                        onOpenDeadline = { selectedTabName = MainTab.MORE.name; moreDestinationName = MoreDestination.DEADLINES.name; editingDeadline = it; editorKind = CreateKind.DEADLINE },
+                        onOpenDeadline = { selectedTabName = MainTab.MORE.name; moreBackStack = listOf(MoreDestination.HUB.name, MoreDestination.DEADLINES.name); editingDeadline = it; editorKind = CreateKind.DEADLINE },
                         onCreateTask = { editorKind = CreateKind.TASK }
                     )
                     MainTab.SCHEDULE -> ScheduleScreen(
@@ -240,58 +335,67 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                         onSearch = { searchSheetOpen = true },
                         onOpenTask = { editingTask = it; editorKind = CreateKind.TASK },
                         onOpenEvent = { editingEvent = it; editorKind = CreateKind.EVENT },
-                        onOpenDeadline = { selectedTabName = MainTab.MORE.name; moreDestinationName = MoreDestination.DEADLINES.name; editingDeadline = it; editorKind = CreateKind.DEADLINE }
+                        onOpenDeadline = { selectedTabName = MainTab.MORE.name; moreBackStack = listOf(MoreDestination.HUB.name, MoreDestination.DEADLINES.name); editingDeadline = it; editorKind = CreateKind.DEADLINE }
                     )
                     MainTab.TASKS -> TasksScreen(
                         tasks = tasks, preferences = preferences,
                         onSearch = { searchSheetOpen = true },
                         onOpenTask = { editingTask = it; editorKind = CreateKind.TASK },
                         onToggleTask = { task -> if (task.status == "COMPLETED") viewModel.uncompleteTask(task.id) else viewModel.completeTask(task.id) },
-                        onCreateTask = { editorKind = CreateKind.TASK }
+                        onCreateTask = { editorKind = CreateKind.TASK },
+                        onDeleteTask = { requestDeleteTask(it) }
                     )
                     MainTab.NOTES -> NotesScreen(
                         notes = notes,
                         onSearch = { searchSheetOpen = true },
                         onCreate = { editorKind = CreateKind.NOTE },
-                        onOpen = { editingNote = it; editorKind = CreateKind.NOTE }
+                        onOpen = { editingNote = it; editorKind = CreateKind.NOTE },
+                        onDeleteNote = { viewModel.deleteNote(it.id) }
                     )
                     MainTab.MORE -> when (moreDestination) {
-                        MoreDestination.HUB -> MoreHubScreen { moreDestinationName = it.name }
+                        MoreDestination.HUB -> MoreHubScreen { pushMore(it) }
                         MoreDestination.GOALS -> GoalsScreen(
                             goals, goalActivities,
-                            onBack = { moreDestinationName = MoreDestination.HUB.name },
+                            onBack = { popMore() },
                             onAdd = { editingGoal = null; editorKind = CreateKind.GOAL },
-                            onOpen = { editingGoal = it; editorKind = CreateKind.GOAL }
+                            onOpen = { editingGoal = it; editorKind = CreateKind.GOAL },
+                            onDelete = { deleteConfirmation = DeleteConfirmation.Goal(it) }
                         )
                         MoreDestination.PROJECTS -> ProjectsScreen(
                             projects,
-                            onBack = { moreDestinationName = MoreDestination.HUB.name },
+                            onBack = { popMore() },
                             onAdd = { editingProject = null; editorKind = CreateKind.PROJECT },
-                            onOpen = { editingProject = it; editorKind = CreateKind.PROJECT }
+                            onOpen = { editingProject = it; editorKind = CreateKind.PROJECT },
+                            onDelete = { deleteConfirmation = DeleteConfirmation.Project(it) }
                         )
                         MoreDestination.COURSES -> CoursesScreen(
                             courses,
-                            onBack = { moreDestinationName = MoreDestination.HUB.name },
+                            onBack = { popMore() },
                             onAdd = { editingCourse = null; editorKind = CreateKind.COURSE },
-                            onOpen = { editingCourse = it; editorKind = CreateKind.COURSE }
+                            onOpen = { editingCourse = it; editorKind = CreateKind.COURSE },
+                            onDelete = { deleteConfirmation = DeleteConfirmation.Course(it) }
                         )
                         MoreDestination.DEADLINES -> DeadlinesScreen(
                             deadlines,
-                            onBack = { moreDestinationName = MoreDestination.HUB.name },
+                            onBack = { popMore() },
                             onAdd = { editingDeadline = null; editorKind = CreateKind.DEADLINE },
                             onOpen = { editingDeadline = it; editorKind = CreateKind.DEADLINE },
-                            onComplete = { viewModel.completeDeadline(it.id) }
+                            onComplete = { viewModel.completeDeadline(it.id) },
+                            onDelete = { viewModel.deleteDeadline(it.id) }
                         )
-                        MoreDestination.INSIGHTS -> InsightsScreen(tasks, completions, goals, goalActivities) { moreDestinationName = MoreDestination.HUB.name }
+                        MoreDestination.INSIGHTS -> InsightsScreen(tasks, completions, goals, goalActivities) { popMore() }
                         MoreDestination.SETTINGS -> SettingsScreen(
                             preferences = preferences,
                             dashboard = dashboard,
                             sounds = sounds,
                             notificationsEnabled = notificationEnabled,
                             exactAlarmsAllowed = exactAlarmsAllowed,
-                            onBack = { moreDestinationName = MoreDestination.HUB.name },
+                            onBack = { popMore() },
                             onSaveName = { viewModel.savePreferences(preferences.copy(displayName = it)) },
-                            onTheme = { viewModel.savePreferences(preferences.copy(themeKey = it)) },
+                            onTheme = { viewModel.setTheme(it) },
+                            onAccent = { viewModel.setAccent(it) },
+                            onToggle24HourClock = { viewModel.setUse24HourClock(it) },
+                            onToggleLoudReminders = { viewModel.setLoudReminders(it) },
                             onSound = { viewModel.selectSound(it) },
                             onTestSound = { viewModel.sendTestNotification() },
                             onImportSound = { audioLauncher.launch(arrayOf("audio/*")) },
@@ -311,7 +415,6 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                 }
             }
         }
-    }
 
     if (addSheetOpen) {
         AddActionSheet(onDismiss = { addSheetOpen = false }) { kind ->
@@ -327,16 +430,6 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
         }
     }
 
-    val closeEditor = {
-        editorKind = null
-        editingTask = null
-        editingEvent = null
-        editingDeadline = null
-        editingNote = null
-        editingGoal = null
-        editingProject = null
-        editingCourse = null
-    }
     when (editorKind) {
         CreateKind.TASK, CreateKind.REMINDER, CreateKind.FITNESS -> TaskEditorSheet(
             existing = editingTask,
@@ -348,9 +441,10 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
             onLoadRule = viewModel::recurrenceRule,
             onLoadSubtasks = viewModel::getSubtasks,
             onDismiss = closeEditor,
+            onDelete = editingTask?.let { task -> { requestDeleteTask(task) } },
+            onArchive = editingTask?.let { task -> { viewModel.archiveTask(task.id) } },
             onSave = { task, frequency, interval, mask, endDay, count, offsets, scope, subtasks ->
-                viewModel.saveTask(task, frequency, interval, mask, endDay, count, offsets, scope)
-                viewModel.saveSubtasksForTask(task.id, subtasks)
+                viewModel.saveTaskWithSubtasks(task, frequency, interval, mask, endDay, count, offsets, scope, subtasks)
             }
         )
         CreateKind.QUICK_CAPTURE -> QuickCaptureSheet(
@@ -374,6 +468,7 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
             use24HourClock = preferences.use24HourClock,
             onLoadReminders = viewModel::reminderOffsets,
             onDismiss = closeEditor,
+            onDelete = editingEvent?.let { event -> { viewModel.deleteEvent(event.id) } },
             onSave = { event, reminders -> viewModel.saveEvent(event, reminders) }
         )
         CreateKind.DEADLINE -> DeadlineEditorSheet(
@@ -381,30 +476,124 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
             use24HourClock = preferences.use24HourClock,
             onLoadReminders = viewModel::reminderOffsets,
             onDismiss = closeEditor,
+            onDelete = editingDeadline?.let { deadline -> { viewModel.deleteDeadline(deadline.id) } },
             onSave = { deadline, reminders -> viewModel.saveDeadline(deadline, reminders) }
         )
-        CreateKind.NOTE -> NoteEditorSheet(existing = editingNote, onDismiss = closeEditor, onSave = { viewModel.saveNote(it) })
-        CreateKind.GOAL -> GoalEditorSheet(existing = editingGoal, onDismiss = closeEditor, onSave = { viewModel.saveGoal(it) })
+        CreateKind.NOTE -> NoteEditorSheet(
+            existing = editingNote,
+            onDismiss = closeEditor,
+            onDelete = editingNote?.let { note -> { viewModel.deleteNote(note.id) } },
+            onSave = { viewModel.saveNote(it) }
+        )
+        CreateKind.GOAL -> GoalEditorSheet(
+            existing = editingGoal,
+            onDismiss = closeEditor,
+            onDelete = editingGoal?.let { goal -> { deleteConfirmation = DeleteConfirmation.Goal(goal) } },
+            onSave = { viewModel.saveGoal(it) }
+        )
         CreateKind.PROJECT -> ProjectEditorSheet(
             existing = editingProject,
             goals = goals,
             onLoadMilestones = viewModel::getMilestonesForProject,
             onDismiss = closeEditor,
+            onDelete = editingProject?.let { project -> { deleteConfirmation = DeleteConfirmation.Project(project) } },
             onSave = { project, milestones ->
-                viewModel.saveProject(project)
-                viewModel.saveMilestonesForProject(project.id, milestones)
+                viewModel.saveProjectWithMilestones(project, milestones)
             }
         )
         CreateKind.COURSE -> CourseEditorSheet(
             existing = editingCourse,
             onLoadModules = viewModel::getCourseModules,
             onDismiss = closeEditor,
+            onDelete = editingCourse?.let { course -> { deleteConfirmation = DeleteConfirmation.Course(course) } },
             onSave = { course, modules ->
-                viewModel.saveCourse(course)
-                viewModel.saveCourseModulesForCourse(course.id, modules)
+                viewModel.saveCourseWithModules(course, modules)
             }
         )
         null -> Unit
+    }
+
+    deleteConfirmation?.let { conf ->
+        val (title, text, confirmAction) = when (conf) {
+            is DeleteConfirmation.Goal -> Triple(
+                "Delete goal?",
+                "Deleting \"${conf.goal.title}\" will also remove any milestones linked to this goal. This can be undone from the snackbar.",
+                { viewModel.deleteGoal(conf.goal.id) }
+            )
+            is DeleteConfirmation.Project -> Triple(
+                "Delete project?",
+                "Deleting \"${conf.project.title}\" will also remove all milestones within this project. This can be undone from the snackbar.",
+                { viewModel.deleteProject(conf.project.id) }
+            )
+            is DeleteConfirmation.Course -> Triple(
+                "Delete course?",
+                "Deleting \"${conf.course.title}\" will also remove all modules inside it. This can be undone from the snackbar.",
+                { viewModel.deleteCourse(conf.course.id) }
+            )
+        }
+        AlertDialog(
+            onDismissRequest = { deleteConfirmation = null },
+            title = { Text(title) },
+            text = { Text(text) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmAction()
+                        deleteConfirmation = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirmation = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    recurringDeleteTarget?.let { task ->
+        AlertDialog(
+            onDismissRequest = { recurringDeleteTarget = null },
+            title = { Text("Delete recurring task") },
+            text = { Text("Choose which occurrences of \"${task.title}\" to delete:") },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteRecurringTask(task.id, RecurringDeleteScope.THIS_OCCURRENCE)
+                            recurringDeleteTarget = null
+                        }
+                    ) {
+                        Text("Just this occurrence")
+                    }
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteRecurringTask(task.id, RecurringDeleteScope.THIS_AND_FUTURE)
+                            recurringDeleteTarget = null
+                        }
+                    ) {
+                        Text("This and all future occurrences")
+                    }
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteRecurringTask(task.id, RecurringDeleteScope.ENTIRE_SERIES)
+                            recurringDeleteTarget = null
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("All occurrences (entire series)")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { recurringDeleteTarget = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (searchSheetOpen) {
@@ -415,7 +604,7 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                 searchSheetOpen = false
                 routeSearchResult(result, tasks, events, deadlines, notes, goals, projects, courses) { tab, page, kind, record ->
                     selectedTabName = tab.name
-                    moreDestinationName = page.name
+                    moreBackStack = listOf(MoreDestination.HUB.name, page.name)
                     when (kind) {
                         CreateKind.TASK -> editingTask = record as? TaskEntity
                         CreateKind.EVENT -> editingEvent = record as? EventEntity
@@ -430,6 +619,7 @@ fun DaymarkApp(viewModel: DaymarkViewModel, notificationTarget: MutableStateFlow
                 }
             }
         )
+    }
     }
 }
 

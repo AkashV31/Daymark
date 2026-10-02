@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,25 +51,23 @@ import com.daymark.app.data.TaskEntity
 import com.daymark.app.ui.formatDay
 import com.daymark.app.ui.formatTime
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextDecoration
+import com.daymark.app.R
+
 @Composable
 fun DaymarkMark(modifier: Modifier = Modifier, size: Dp = 38.dp) {
-    Box(
-        modifier = modifier
-            .size(size)
-            .clip(RoundedCornerShape(size * 0.34f))
-            .background(Brush.linearGradient(listOf(Color(0xFF897BEF), Color(0xFF5F68CC)))),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("D", color = Color.White, fontSize = (size.value * .54f).sp, fontWeight = FontWeight.Bold, lineHeight = (size.value * .62f).sp)
-        Box(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = size * .16f, bottom = size * .15f)
-                .size(size * .18f)
-                .clip(CircleShape)
-                .background(Color(0xFFBFE8DB))
-        )
-    }
+    Image(
+        painter = painterResource(id = R.drawable.ic_daymark_mark),
+        contentDescription = null,
+        modifier = modifier.size(size)
+    )
 }
 
 @Composable
@@ -203,6 +202,11 @@ fun EmptyState(
 @Composable
 fun ProgressRing(progress: Float, modifier: Modifier = Modifier, label: String? = null) {
     val primary = MaterialTheme.colorScheme.primary
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+        label = "ProgressRingAnimation"
+    )
     Box(modifier = modifier.size(66.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(62.dp)) {
             val stroke = 6.dp.toPx()
@@ -218,14 +222,14 @@ fun ProgressRing(progress: Float, modifier: Modifier = Modifier, label: String? 
             drawArc(
                 color = primary,
                 startAngle = -90f,
-                sweepAngle = 360f * progress.coerceIn(0f, 1f),
+                sweepAngle = 360f * animatedProgress,
                 useCenter = false,
                 style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = StrokeCap.Round),
                 topLeft = Offset(stroke / 2, stroke / 2),
                 size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
             )
         }
-        Text(label ?: "${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+        Text(label ?: "${(animatedProgress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -236,7 +240,8 @@ fun TaskRow(
     onToggle: () -> Unit,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    onDelete: (() -> Unit)? = null
 ) {
     val completed = task.status == "COMPLETED"
     Row(
@@ -249,11 +254,18 @@ fun TaskRow(
             modifier = Modifier.size(48.dp).semantics { contentDescription = if (completed) "Mark ${task.title} not complete" else "Complete ${task.title}" }
         )
         Spacer(Modifier.width(5.dp))
+        val targetColor = if (completed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface
+        val animatedTitleColor by animateColorAsState(
+            targetValue = targetColor,
+            animationSpec = tween(durationMillis = 200),
+            label = "TaskTitleColor"
+        )
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 task.title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                color = animatedTitleColor,
+                textDecoration = if (completed) TextDecoration.LineThrough else TextDecoration.None,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -268,6 +280,19 @@ fun TaskRow(
             }
         }
         PriorityMark(task.priority)
+        if (onDelete != null) {
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(36.dp).semantics { contentDescription = "Delete ${task.title}" }
+            ) {
+                Icon(
+                    Icons.Rounded.DeleteOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        }
     }
 }
 
@@ -275,8 +300,8 @@ fun TaskRow(
 fun PriorityMark(priority: String) {
     if (priority == "NORMAL" || priority == "LOW") return
     val color = when (priority) {
-        "CRITICAL" -> Color(0xFFCE7681)
-        "HIGH" -> Color(0xFFCB9A5C)
+        "CRITICAL" -> MaterialTheme.colorScheme.error
+        "HIGH" -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, end = 6.dp)) {

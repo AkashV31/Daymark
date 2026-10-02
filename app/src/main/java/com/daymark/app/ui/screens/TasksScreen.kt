@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -40,20 +41,25 @@ fun TasksScreen(
     onSearch: () -> Unit,
     onOpenTask: (TaskEntity) -> Unit,
     onToggleTask: (TaskEntity) -> Unit,
-    onCreateTask: () -> Unit
+    onCreateTask: () -> Unit,
+    onDeleteTask: ((TaskEntity) -> Unit)? = null
 ) {
     var selected by rememberSaveable { mutableStateOf(TaskFilter.TODAY.name) }
     val filter = TaskFilter.entries.firstOrNull { it.name == selected } ?: TaskFilter.TODAY
     val today = LocalDate.now().toEpochDay()
-    val open = tasks.filter { !it.archived && it.status != "COMPLETED" && it.status != "SKIPPED" }
-    val completed = tasks.filter { !it.archived && it.status == "COMPLETED" }.sortedByDescending { it.completedAtMillis }
-    val filtered = when (filter) {
-        TaskFilter.TODAY -> open.filter { it.dueEpochDay == today }.sortedWith(taskSort())
-        TaskFilter.UPCOMING -> open.filter { it.dueEpochDay != null && it.dueEpochDay > today }.sortedWith(taskSort())
-        TaskFilter.OVERDUE -> open.filter { it.dueEpochDay != null && it.dueEpochDay < today }.sortedWith(taskSort())
-        TaskFilter.ANYTIME -> open.filter { it.dueEpochDay == null }
-        TaskFilter.COMPLETED -> completed
-        TaskFilter.ALL -> (open + completed).sortedWith(taskSort())
+
+    val (open, completed, filtered) = remember(tasks, filter, today) {
+        val o = tasks.filter { !it.archived && it.status != "COMPLETED" && it.status != "SKIPPED" }
+        val c = tasks.filter { !it.archived && it.status == "COMPLETED" }.sortedByDescending { it.completedAtMillis }
+        val f = when (filter) {
+            TaskFilter.TODAY -> o.filter { it.dueEpochDay == today }.sortedWith(taskSort())
+            TaskFilter.UPCOMING -> o.filter { it.dueEpochDay != null && it.dueEpochDay > today }.sortedWith(taskSort())
+            TaskFilter.OVERDUE -> o.filter { it.dueEpochDay != null && it.dueEpochDay < today }.sortedWith(taskSort())
+            TaskFilter.ANYTIME -> o.filter { it.dueEpochDay == null }
+            TaskFilter.COMPLETED -> c
+            TaskFilter.ALL -> (o + c).sortedWith(taskSort())
+        }
+        Triple(o, c, f)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -72,7 +78,7 @@ fun TasksScreen(
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (filtered.isEmpty()) {
@@ -100,7 +106,7 @@ fun TasksScreen(
                     )
                 }
             } else {
-                item {
+                item(key = "header_summary") {
                     Text(
                         when (filter) {
                             TaskFilter.TODAY -> "TODAY · ${filtered.size} ${if (filtered.size == 1) "TASK" else "TASKS"}"
@@ -115,27 +121,21 @@ fun TasksScreen(
                         letterSpacing = .8f.sp
                     )
                 }
-                item {
-                    SoftCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
-                            filtered.forEachIndexed { index, task ->
-                                TaskRow(
-                                    task = task,
-                                    use24HourClock = preferences.use24HourClock,
-                                    onToggle = { onToggleTask(task) },
-                                    onOpen = { onOpenTask(task) }
-                                )
-                                if (index != filtered.lastIndex) androidx.compose.material3.HorizontalDivider(
-                                    modifier = Modifier.padding(start = 54.dp),
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f)
-                                )
-                            }
-                        }
+                items(filtered, key = { it.id }) { task ->
+                    SoftCard(modifier = Modifier.fillMaxWidth().animateItem()) {
+                        TaskRow(
+                            task = task,
+                            use24HourClock = preferences.use24HourClock,
+                            onToggle = { onToggleTask(task) },
+                            onOpen = { onOpenTask(task) },
+                            onDelete = onDeleteTask?.let { { it(task) } },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
                     }
                 }
             }
             if (filter != TaskFilter.TODAY && open.any { it.dueEpochDay == today } && filtered.isNotEmpty()) {
-                item { Spacer(Modifier.height(6.dp)) }
+                item(key = "today_spacer") { Spacer(Modifier.height(6.dp)) }
             }
         }
     }

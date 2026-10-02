@@ -11,15 +11,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -43,17 +46,24 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.remember
+
 @Composable
 fun NotesScreen(
     notes: List<NoteEntity>,
     onSearch: () -> Unit,
     onCreate: () -> Unit,
-    onOpen: (NoteEntity) -> Unit
+    onOpen: (NoteEntity) -> Unit,
+    onDeleteNote: ((NoteEntity) -> Unit)? = null
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    val filtered = notes.filter {
-        query.isBlank() || it.title.contains(query, true) || it.content.contains(query, true)
-    }.sortedWith(compareByDescending<NoteEntity> { it.isPinned }.thenByDescending { it.updatedAtMillis })
+    val filtered = remember(notes, query) {
+        notes.filter {
+            query.isBlank() || it.title.contains(query, true) || it.content.contains(query, true)
+        }.sortedWith(compareByDescending<NoteEntity> { it.isPinned }.thenByDescending { it.updatedAtMillis })
+    }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Notes", "Ideas, details and things to keep", onSearch = onSearch)
         OutlinedTextField(
@@ -76,18 +86,22 @@ fun NotesScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 26.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val pinned = filtered.filter { it.isPinned }
                 val recent = filtered.filterNot { it.isPinned }
                 if (pinned.isNotEmpty()) {
                     item("pinned-heading") { SectionLabel("PINNED") }
-                    items(pinned, key = { it.id }) { note -> NoteCard(note, onClick = { onOpen(note) }) }
+                    items(pinned, key = { it.id }) { note ->
+                        NoteCard(note, onClick = { onOpen(note) }, onDelete = onDeleteNote?.let { { it(note) } }, modifier = Modifier.animateItem())
+                    }
                 }
                 if (recent.isNotEmpty()) {
                     item("recent-heading") { SectionLabel(if (pinned.isNotEmpty()) "RECENT" else "ALL NOTES") }
-                    items(recent, key = { it.id }) { note -> NoteCard(note, onClick = { onOpen(note) }) }
+                    items(recent, key = { it.id }) { note ->
+                        NoteCard(note, onClick = { onOpen(note) }, onDelete = onDeleteNote?.let { { it(note) } }, modifier = Modifier.animateItem())
+                    }
                 }
             }
         }
@@ -100,8 +114,8 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun NoteCard(note: NoteEntity, onClick: () -> Unit) {
-    SoftCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(21.dp), onClick = onClick) {
+private fun NoteCard(note: NoteEntity, onClick: () -> Unit, onDelete: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    SoftCard(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(21.dp), onClick = onClick) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -114,6 +128,20 @@ private fun NoteCard(note: NoteEntity, onClick: () -> Unit) {
                 )
                 if (note.isPinned) {
                     Icon(Icons.Rounded.PushPin, contentDescription = "Pinned", modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+                if (onDelete != null) {
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.DeleteOutline,
+                            contentDescription = "Delete note",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
             if (note.content.isNotBlank()) {

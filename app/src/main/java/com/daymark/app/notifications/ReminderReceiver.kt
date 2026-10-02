@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -25,10 +26,11 @@ class ReminderReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val app = context.applicationContext as DaymarkApplication
-                val database = app.database
-                val reminder = database.reminderDao().get(reminderId) ?: return@launch
-                if (!reminder.enabled || reminder.ownerType != ownerType || reminder.ownerId != ownerId) return@launch
+                withTimeout(15_000L) {
+                    val app = context.applicationContext as DaymarkApplication
+                    val database = app.database
+                    val reminder = database.reminderDao().get(reminderId) ?: return@withTimeout
+                    if (!reminder.enabled || reminder.ownerType != ownerType || reminder.ownerId != ownerId) return@withTimeout
 
                 val content = when (ownerType) {
                     DaymarkRepository.OWNER_TASK -> database.taskDao().get(ownerId)?.takeIf {
@@ -40,20 +42,22 @@ class ReminderReceiver : BroadcastReceiver() {
                         !it.archived && it.status != "COMPLETED"
                     }?.let { Triple(it.title, it.description, true) }
                     else -> null
-                } ?: return@launch
+                } ?: return@withTimeout
 
                 val isSnoozeDelivery = reminder.snoozedUntilMillis != null
-                if (reminder.lastDeliveredAtMillis != null && !isSnoozeDelivery) return@launch
+                if (reminder.lastDeliveredAtMillis != null && !isSnoozeDelivery) return@withTimeout
                 val manager = NotificationManagerCompat.from(context)
-                if (!manager.areNotificationsEnabled()) return@launch
+                if (!manager.areNotificationsEnabled()) return@withTimeout
 
                 val preferences = database.preferenceDao().get()
+                val loud = preferences?.loudReminders ?: true
                 val soundId = reminder.soundId.ifBlank { preferences?.notificationSoundId ?: "default" }
                 val sound = database.soundDao().get(soundId)
                 val channelId = NotificationChannels.ensureChannel(
                     context,
                     soundId,
-                    sound?.takeIf { !it.isBuiltIn }?.contentUri?.let { android.net.Uri.parse(it) }
+                    sound?.takeIf { !it.isBuiltIn }?.contentUri?.let { android.net.Uri.parse(it) },
+                    loud = loud
                 )
                 val notificationId = key.hashCode()
                 val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -77,22 +81,25 @@ class ReminderReceiver : BroadcastReceiver() {
                         putExtra(EXTRA_ALARM_KEY, key)
                     }
                 }
+                val bodyText = content.second.ifBlank {
+                    when (ownerType) {
+                        DaymarkRepository.OWNER_TASK -> "A task you planned is ready."
+                        DaymarkRepository.OWNER_EVENT -> "An item on your schedule is coming up."
+                        else -> "A deadline is coming up."
+                    }
+                }
                 val notification = NotificationCompat.Builder(context, channelId)
                     .setSmallIcon(R.drawable.ic_stat_daymark)
                     .setContentTitle(content.first)
-                    .setContentText(content.second.ifBlank {
-                        when (ownerType) {
-                            DaymarkRepository.OWNER_TASK -> "A task you planned is ready."
-                            DaymarkRepository.OWNER_EVENT -> "An item on your schedule is coming up."
-                            else -> "A deadline is coming up."
-                        }
-                    })
+                    .setContentText(bodyText)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(bodyText))
                     .setContentIntent(openPending)
                     .setAutoCancel(true)
-                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                    .setShowWhen(true)
                     .addAction(
-                        R.drawable.ic_stat_daymark,
+                        R.drawable.ic_action_snooze,
                         "Snooze 10m",
                         PendingIntent.getBroadcast(
                             context,
@@ -104,7 +111,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     .apply {
                         if (content.third) {
                             addAction(
-                                R.drawable.ic_stat_daymark,
+                                R.drawable.ic_action_done,
                                 if (ownerType == DaymarkRepository.OWNER_DEADLINE) "Complete" else "Done",
                                 PendingIntent.getBroadcast(
                                     context,
@@ -128,6 +135,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 } catch (_: SecurityException) {
                     // Permission can be revoked after the alarm fires. Keep it undelivered so
                     // a later permission grant/reconcile can retry within the late-reminder window.
+                }
                 }
             } catch (_: Exception) {
                 // A damaged/stale reminder must not crash the application process or lose other data.

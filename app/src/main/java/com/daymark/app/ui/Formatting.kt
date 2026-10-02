@@ -7,19 +7,19 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val dayFormat = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault())
-private val longDateFormat = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.getDefault())
-private val monthFormat = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
-private val time12Format = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
-private val time24Format = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+private fun dayFormat() = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.getDefault())
+private fun longDateFormat() = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.getDefault())
+private fun monthFormat() = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
+private fun time12Format() = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+private fun time24Format() = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
 
-fun formatDay(epochDay: Long): String = LocalDate.ofEpochDay(epochDay).format(dayFormat)
-fun formatLongDate(epochDay: Long): String = LocalDate.ofEpochDay(epochDay).format(longDateFormat)
-fun formatMonth(date: LocalDate): String = date.format(monthFormat)
+fun formatDay(epochDay: Long): String = LocalDate.ofEpochDay(epochDay).format(dayFormat())
+fun formatLongDate(epochDay: Long): String = LocalDate.ofEpochDay(epochDay).format(longDateFormat())
+fun formatMonth(date: LocalDate): String = date.format(monthFormat())
 fun formatTime(minuteOfDay: Int?, use24Hour: Boolean = false): String {
     if (minuteOfDay == null) return "Any time"
     val time = LocalTime.of((minuteOfDay / 60).coerceIn(0, 23), (minuteOfDay % 60).coerceIn(0, 59))
-    return time.format(if (use24Hour) time24Format else time12Format)
+    return time.format(if (use24Hour) time24Format() else time12Format())
 }
 fun greetingForHour(hour: Int = LocalTime.now().hour): String = when (hour) {
     in 5..11 -> "Good morning"
@@ -33,10 +33,15 @@ fun relativeDateLabel(epochDay: Long, today: LocalDate = LocalDate.now()): Strin
         today -> "Today"
         today.plusDays(1) -> "Tomorrow"
         today.minusDays(1) -> "Yesterday"
-        else -> date.format(dayFormat)
+        else -> date.format(dayFormat())
     }
 }
-fun remainingLabel(epochDay: Long, minuteOfDay: Int? = null, nowMillis: Long = System.currentTimeMillis()): String {
+fun remainingLabel(
+    epochDay: Long,
+    minuteOfDay: Int? = null,
+    use24Hour: Boolean = false,
+    nowMillis: Long = System.currentTimeMillis()
+): String {
     val zone = ZoneId.systemDefault()
     val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
     val date = LocalDate.ofEpochDay(epochDay)
@@ -44,7 +49,7 @@ fun remainingLabel(epochDay: Long, minuteOfDay: Int? = null, nowMillis: Long = S
     return when {
         days < -1 -> "${-days} days overdue"
         days == -1L -> "Overdue since yesterday"
-        days == 0L && minuteOfDay != null -> "Due ${formatTime(minuteOfDay)}"
+        days == 0L && minuteOfDay != null -> "Due ${formatTime(minuteOfDay, use24Hour)}"
         days == 0L -> "Due today"
         days == 1L -> "Due tomorrow"
         else -> "${days} days remaining"

@@ -1,0 +1,5 @@
+<resources>
+    <color name="splash_background">#15151F</color>
+    <color name="brand_violet">#A99BFF</color>
+    <color name="brand_white">#FFFFFFFF</color>
+</resources>
