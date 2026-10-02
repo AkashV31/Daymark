@@ -21,16 +21,16 @@ android {
     }
 
     val releaseKeyStore = rootProject.file("daymark-release.jks")
-    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
-    val keyPassword = System.getenv("KEY_PASSWORD")
-    val hasReleaseSigning = releaseKeyStore.exists() && !keystorePassword.isNullOrBlank() && !keyPassword.isNullOrBlank()
-    if (hasReleaseSigning) {
-        signingConfigs {
+    val hasReleaseSigning = releaseKeyStore.exists()
+    signingConfigs {
+        if (hasReleaseSigning) {
             create("release") {
                 storeFile = releaseKeyStore
-                storePassword = keystorePassword
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "daymark123"
                 keyAlias = System.getenv("KEY_ALIAS") ?: "daymark"
-                this.keyPassword = keyPassword
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "daymark123"
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
@@ -39,8 +39,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
