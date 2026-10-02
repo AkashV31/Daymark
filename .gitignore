@@ -1,0 +1,42 @@
+# Built application files
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Java/Kotlin class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+build/
+app/build/
+.gradle/
+buildOutput/
+
+# Local configuration file (contains local Android SDK path)
+local.properties
+
+# Signing / Keystore credentials (NEVER commit to public repositories)
+*.jks
+*.keystore
+daymark-release.jks
+
+# Android Studio / IntelliJ IDEA
+*.iml
+.idea/
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+
+# Kotlin / Android compiler cache
+.kotlin/
+.android/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+Desktop.ini

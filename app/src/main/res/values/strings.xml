@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Daymark</string>
+    <string name="notification_group_name">Daymark</string>
+    <string name="notification_channel_description">Scheduled reminders from Daymark.</string>
+    <string name="notification_test_channel">Daymark sound test</string>
+    <string name="notification_test_channel_description">A one-off channel for checking reminder sounds.</string>
+    <string name="test_notification_title">Sound check</string>
+    <string name="test_notification_body">Your Daymark reminder sound is ready.</string>
+</resources>
